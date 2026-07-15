@@ -1,50 +1,58 @@
 #include <adwaita.h>
 #include <gst/gst.h>
 
+#include "player.h"
 #include "track.h"
 #include "waveform.h"
 
 typedef struct {
     GtkWindow *win;
-    GtkWidget *list;        // vertical GtkBox of waveform panes
-    GtkWidget *placeholder; // shown while empty
-    GPtrArray *tracks;      // Track*
-    GPtrArray *waves;       // GtkWidget* drawing area, parallel to tracks
-    GPtrArray *rows;        // GtkWidget* pane container, parallel to tracks
-    int        active;      // -1 if none
+    GtkWidget *list;         // vertical GtkBox of waveform panes
+    GtkWidget *placeholder;  // shown while empty
+    GtkWidget *hovered_wave; // pane under the pointer, for bus assignment
+    GPtrArray *tracks;       // Track*
+    GPtrArray *waves;        // GtkWidget* drawing area, parallel to tracks
+    GPtrArray *rows;         // GtkWidget* pane container, parallel to tracks
+    int        active;       // focused track, -1 if none
     gboolean   playing;
     guint      tick_id;
 } App;
 
 static App app;
 
-static void
-update_borders(void)
+// Audible = the active track's bus (all its members), or just the active track
+// if it is ungrouped. Panes in the audible set also get the highlighted border.
+static gboolean
+is_audible(int i)
 {
-    for (guint i = 0; i < app.waves->len; i++)
-        waveform_set_active(g_ptr_array_index(app.waves, i), (int)i == app.active);
+    if (app.active < 0)
+        return FALSE;
+    Track *at = g_ptr_array_index(app.tracks, app.active);
+    if (at->bus < 0)
+        return i == app.active;
+    Track *ti = g_ptr_array_index(app.tracks, i);
+    return ti->bus == at->bus;
 }
 
+static void
+apply_audible(void)
+{
+    for (guint i = 0; i < app.tracks->len; i++) {
+        gboolean on = is_audible((int)i);
+        player_set_audible(g_ptr_array_index(app.tracks, i), on);
+        waveform_set_active(g_ptr_array_index(app.waves, i), on);
+    }
+}
+
+// One shared pipeline, so switching only changes which tracks are unmuted --
+// position is inherently preserved.
 static void
 set_active(int b)
 {
     if (b < 0 || b >= (int)app.tracks->len || b == app.active)
         return;
-
-    gint64 pos = 0;
-    if (app.active >= 0) {
-        Track *cur = g_ptr_array_index(app.tracks, app.active);
-        pos        = track_position(cur);
-        if (pos < 0)
-            pos = 0;
-        track_pause(cur);
-    }
     app.active = b;
-    Track *t   = g_ptr_array_index(app.tracks, b);
-    track_seek(t, pos);
-    if (app.playing)
-        track_play(t);
-    update_borders();
+    apply_audible();
 }
 
 static void
@@ -52,12 +60,11 @@ toggle_play(void)
 {
     if (app.active < 0)
         return;
-    Track *t    = g_ptr_array_index(app.tracks, app.active);
     app.playing = !app.playing;
     if (app.playing)
-        track_play(t);
+        player_play();
     else
-        track_pause(t);
+        player_pause();
 }
 
 static void
@@ -66,7 +73,7 @@ seek_relative(gint64 delta)
     if (app.active < 0)
         return;
     Track *t   = g_ptr_array_index(app.tracks, app.active);
-    gint64 pos = track_position(t);
+    gint64 pos = player_position();
     if (pos < 0)
         pos = 0;
     pos += delta;
@@ -74,7 +81,7 @@ seek_relative(gint64 delta)
         pos = 0;
     if (t->duration > 0 && pos > t->duration)
         pos = t->duration;
-    track_seek(t, pos);
+    player_seek(pos);
 }
 
 static void
@@ -88,7 +95,7 @@ on_wave_click(GtkWidget *wf, double frac, gpointer user)
         return;
     }
     Track *t = g_ptr_array_index(app.tracks, i);
-    track_seek(t, (gint64)(frac * t->duration)); // scrub within the active pane
+    player_seek((gint64)(frac * t->duration)); // scrub within the active pane
 }
 
 static void
@@ -110,7 +117,11 @@ remove_track(GtkWidget *row)
         return;
 
     gboolean was_active = ((int)i == app.active);
-    track_free(g_ptr_array_index(app.tracks, i));
+    Track   *t          = g_ptr_array_index(app.tracks, i);
+    if (app.hovered_wave == row || app.hovered_wave == g_ptr_array_index(app.waves, i))
+        app.hovered_wave = NULL;
+    player_remove(t);
+    track_free(t);
     gtk_box_remove(GTK_BOX(app.list), row);
     g_ptr_array_remove_index(app.tracks, i);
     g_ptr_array_remove_index(app.waves, i);
@@ -121,12 +132,11 @@ remove_track(GtkWidget *row)
         app.playing = FALSE;
         show_placeholder();
     } else if (was_active) {
-        app.active = -1; // set_active seeks the new track from position 0
-        set_active(MIN(i, app.tracks->len - 1));
+        app.active = MIN((int)i, (int)app.tracks->len - 1);
     } else if ((int)i < app.active) {
         app.active--;
     }
-    update_borders();
+    apply_audible();
 }
 
 static void
@@ -163,13 +173,32 @@ fit_window(void)
 }
 
 static void
+on_wave_enter(GtkEventControllerMotion *m, double x, double y, gpointer wf)
+{
+    app.hovered_wave = wf;
+}
+
+static void
+on_wave_leave(GtkEventControllerMotion *m, gpointer wf)
+{
+    if (app.hovered_wave == wf)
+        app.hovered_wave = NULL;
+}
+
+static void
 add_track(const char *uri)
 {
     Track *t = track_new(uri);
     g_ptr_array_add(app.tracks, t);
+    player_add(t);
 
     GtkWidget *wf = waveform_new(t, on_wave_click, NULL);
     g_ptr_array_add(app.waves, wf);
+
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "enter", G_CALLBACK(on_wave_enter), wf);
+    g_signal_connect(motion, "leave", G_CALLBACK(on_wave_leave), wf);
+    gtk_widget_add_controller(wf, motion);
 
     // Overlay a close button on the top-right of the pane.
     GtkWidget *row = gtk_overlay_new();
@@ -203,8 +232,7 @@ static gboolean
 tick(gpointer user)
 {
     if (app.active >= 0) {
-        Track *t   = g_ptr_array_index(app.tracks, app.active);
-        gint64 pos = track_position(t);
+        gint64 pos = player_position();
         if (pos >= 0) {
             for (guint i = 0; i < app.waves->len; i++) {
                 Track *ti   = g_ptr_array_index(app.tracks, i);
@@ -222,6 +250,18 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
     if (keyval == GDK_KEY_space) {
         toggle_play();
         return TRUE;
+    }
+    // Digit over a pane: toggle that track's bus membership.
+    if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9) {
+        guint i;
+        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+            Track *t = g_ptr_array_index(app.tracks, i);
+            int    b = (int)(keyval - GDK_KEY_0);
+            t->bus   = (t->bus == b) ? -1 : b;
+            gtk_widget_queue_draw(g_ptr_array_index(app.waves, i));
+            apply_audible();
+            return TRUE;
+        }
     }
     if (keyval == GDK_KEY_Left || keyval == GDK_KEY_Right) {
         gint64 step = (state & GDK_CONTROL_MASK) ? 100 * GST_MSECOND
@@ -293,6 +333,7 @@ activate(GtkApplication *gapp, gpointer user)
         gtk_window_present(app.win);
         return;
     }
+    player_init();
     app.tracks = g_ptr_array_new();
     app.waves  = g_ptr_array_new();
     app.rows   = g_ptr_array_new();
@@ -366,6 +407,7 @@ on_shutdown(GApplication *gapp, gpointer user)
         return;
     if (app.tick_id)
         g_source_remove(app.tick_id);
+    player_shutdown();
     for (guint i = 0; i < app.tracks->len; i++)
         track_free(g_ptr_array_index(app.tracks, i));
     g_ptr_array_free(app.tracks, TRUE);

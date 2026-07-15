@@ -3,6 +3,13 @@
 
 #include "waveform.h"
 
+// Distinct colour per bus 0-9, for borders and the numbered badge.
+static const double BUS_PALETTE[10][3] = {
+    { 0.88, 0.11, 0.14 }, { 1.00, 0.47, 0.00 }, { 0.96, 0.76, 0.06 }, { 0.20, 0.82, 0.48 },
+    { 0.13, 0.83, 0.83 }, { 0.21, 0.52, 0.89 }, { 0.49, 0.31, 0.77 }, { 0.96, 0.42, 0.69 },
+    { 0.60, 0.42, 0.27 }, { 0.60, 0.60, 0.59 },
+};
+
 typedef struct {
     Track          *track;
     gboolean        active;
@@ -110,12 +117,35 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
         cairo_show_text(cr, tbuf);
     }
 
-    // active border
-    if (d->active) {
-        cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
-        cairo_set_line_width(cr, 2.0);
-        cairo_rectangle(cr, 1, 1, w - 2, h - 2);
+    // border: bus colour if grouped (else accent), thick when audible/active
+    int      bus     = d->track->bus;
+    gboolean grouped = bus >= 0 && bus < 10;
+    if (grouped || d->active) {
+        if (grouped)
+            cairo_set_source_rgb(cr, BUS_PALETTE[bus][0], BUS_PALETTE[bus][1], BUS_PALETTE[bus][2]);
+        else
+            cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
+        double lw = d->active ? 4.0 : 2.0;
+        cairo_set_line_width(cr, lw);
+        cairo_rectangle(cr, lw / 2, lw / 2, w - lw, h - lw);
         cairo_stroke(cr);
+    }
+
+    // bus badge: the digit in a filled box, bottom-left
+    if (grouped) {
+        char label[2] = { (char)('0' + bus), 0 };
+        cairo_set_font_size(cr, 12);
+        cairo_text_extents_t be;
+        cairo_text_extents(cr, label, &be);
+        double pad = 5, bw = be.width + 2 * pad, bh = 12 + 2 * pad;
+        double bx = 6, by = h - 6 - bh;
+
+        cairo_set_source_rgb(cr, BUS_PALETTE[bus][0], BUS_PALETTE[bus][1], BUS_PALETTE[bus][2]);
+        cairo_rectangle(cr, bx, by, bw, bh);
+        cairo_fill(cr);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_move_to(cr, bx + pad - be.x_bearing, by + pad - be.y_bearing);
+        cairo_show_text(cr, label);
     }
 }
 
