@@ -1,0 +1,77 @@
+#+TITLE: audio-compare -- Technical Design Document
+#+STARTUP: showall
+
+* Purpose
+
+Compare two or more audio files by ear at the same playback position.
+Load files, see their waveforms, hit space to play, switch which file
+you hear without losing your place.
+
+* Scope
+
+- Formats: mp3, wav, ogg. Mono or stereo. (Whatever GStreamer decodes.)
+- Open via file dialog or drag-and-drop onto the window.
+- One waveform pane per file, stacked vertically.
+- Space: play/pause.
+- Alt+Up / Alt+Down: switch active file. Clicking a pane also switches.
+- Switching keeps the playback position.
+- Click a pane to seek to that position.
+
+Non-goals: editing, format conversion, spectrum/analysis views, level
+matching, more than the waveform. Add if ever needed.
+
+* Stack
+
+Same as ~gattn~: GTK4 + libadwaita, C11, meson, nix flake.
+
+- *Decode + playback*: GStreamer (~gstreamer-1.0~). Covers every format
+  and channel layout; no per-codec libraries.
+- *Waveform draw*: Cairo in a ~GtkDrawingArea~. Native, no dep.
+
+* Architecture
+
+Flat ~src/~, one file per concern. No layers until one hurts.
+
+#+begin_example
+src/main.c        GtkApplication, window, keybindings, drag-and-drop
+src/track.c/.h    one audio file: peaks + a playbin pipeline
+src/waveform.c/.h GtkDrawingArea subclass: draws peaks + playhead, click-to-seek
+#+end_example
+
+** Track
+
+Each loaded file is a ~Track~:
+
+- A ~playbin~ pipeline (GStreamer picks the decoder from the URI).
+- Peak data: min/max sample pair per horizontal pixel bucket,
+  decoded once via an ~appsink~ branch when the file loads.
+
+** Playback and position
+
+Only the active track's pipeline plays. Switching:
+
+1. Query position of the active pipeline.
+2. Pause it.
+3. Seek the target pipeline to that position, set it playing.
+
+# ponytail: one pipeline per track, only active one runs. Alternative is
+# N pipelines playing muted in lockstep for gap-free switching -- do that
+# only if the seek-on-switch gap is audible in practice.
+
+A ~GTK~ tick queries the active position and redraws the playhead.
+
+* UI
+
+libadwaita window. Header bar with an Open button. Body is a vertical
+box of waveform panes, one per track. Active pane gets a visible border.
+Empty state: a drop hint.
+
+* Build / run
+
+~meson setup build && meson compile -C build && ./build/audio-compare~.
+Deps via ~nix develop~. App id ~org.mmxgn.audiocompare~.
+
+* Open questions
+
+- Peak decode on a worker thread vs. blocking the load? Start blocking;
+  move off-thread if large files stall the UI.
