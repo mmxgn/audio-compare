@@ -199,6 +199,21 @@ fit_window(void)
         gtk_window_set_default_size(app.win, w > 0 ? w : 800, want);
 }
 
+// Pause the pipeline during a scrub drag so the flushing seeks hit a stopped
+// sink (silent, no clicks); resume afterwards if it was playing.
+static gboolean scrub_was_playing;
+static void
+on_wave_scrub(GtkWidget *wf, gboolean active, gpointer user)
+{
+    if (active) {
+        scrub_was_playing = app.playing;
+        if (app.playing)
+            player_pause();
+    } else if (scrub_was_playing) {
+        player_play();
+    }
+}
+
 static void
 on_wave_enter(GtkEventControllerMotion *m, double x, double y, gpointer wf)
 {
@@ -219,7 +234,7 @@ add_track(const char *uri)
     g_ptr_array_add(app.tracks, t);
     player_add(t);
 
-    GtkWidget *wf = waveform_new(t, on_wave_click, NULL);
+    GtkWidget *wf = waveform_new(t, on_wave_click, on_wave_scrub, NULL);
     g_ptr_array_add(app.waves, wf);
 
     GtkEventController *motion = gtk_event_controller_motion_new();
@@ -287,6 +302,17 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
             t->bus   = (t->bus == b) ? -1 : b;
             gtk_widget_queue_draw(g_ptr_array_index(app.waves, i));
             apply_audible();
+            return TRUE;
+        }
+    }
+    // '-' or 'i' over a pane: invert that track's polarity.
+    if (keyval == GDK_KEY_minus || keyval == GDK_KEY_i) {
+        guint i;
+        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+            Track *t    = g_ptr_array_index(app.tracks, i);
+            t->inverted = !t->inverted;
+            player_set_inverted(t, t->inverted);
+            gtk_widget_queue_draw(g_ptr_array_index(app.waves, i));
             return TRUE;
         }
     }

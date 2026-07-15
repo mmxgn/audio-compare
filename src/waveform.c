@@ -16,6 +16,7 @@ typedef struct {
     double          playhead; // 0..1
     double          drag_x;   // press x, for drag scrubbing
     WaveformClickFn on_click;
+    WaveformScrubFn on_scrub;
     gpointer        user;
 } WfData;
 
@@ -38,10 +39,21 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     gtk_widget_get_color(GTK_WIDGET(area), &acc);
 #endif
 
-    // waveform: one vertical line per pixel column
+    // Inverted tracks show inverted colours: fill with the accent and draw
+    // content in a contrasting shade. Otherwise the "view" bg shows through.
+    GdkRGBA fg = acc;
+    if (d->track->inverted) {
+        cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
+        cairo_paint(cr);
+        double lum = 0.2126 * acc.red + 0.7152 * acc.green + 0.0722 * acc.blue;
+        fg.red = fg.green = fg.blue = lum > 0.5 ? 0.0 : 1.0;
+    }
+
+    // waveform: one vertical line per pixel column (flipped when inverted)
+    double  sgn   = d->track->inverted ? -1.0 : 1.0;
     GArray *peaks = d->track->peaks;
     if (peaks->len > 0) {
-        cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
+        cairo_set_source_rgb(cr, fg.red, fg.green, fg.blue);
         cairo_set_line_width(cr, 1.0);
         for (int x = 0; x < w; x++) {
             guint i0 = (guint)((gint64)x * peaks->len / w);
@@ -58,14 +70,14 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
                 if (p.max > hi)
                     hi = p.max;
             }
-            cairo_move_to(cr, x + 0.5, mid - hi * amp);
-            cairo_line_to(cr, x + 0.5, mid - lo * amp);
+            cairo_move_to(cr, x + 0.5, mid - hi * amp * sgn);
+            cairo_line_to(cr, x + 0.5, mid - lo * amp * sgn);
             cairo_stroke(cr);
         }
     }
 
     // caption: filename, top-left, same colour as the waveform
-    cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
+    cairo_set_source_rgb(cr, fg.red, fg.green, fg.blue);
     cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, 11);
     cairo_move_to(cr, 6, 15);
@@ -124,7 +136,7 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
         if (grouped)
             cairo_set_source_rgb(cr, BUS_PALETTE[bus][0], BUS_PALETTE[bus][1], BUS_PALETTE[bus][2]);
         else
-            cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
+            cairo_set_source_rgb(cr, fg.red, fg.green, fg.blue);
         double lw = d->active ? 4.0 : 2.0;
         cairo_set_line_width(cr, lw);
         cairo_rectangle(cr, lw / 2, lw / 2, w - lw, h - lw);
@@ -164,7 +176,18 @@ on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer user)
     GtkWidget *wf = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
     WfData    *d  = g_object_get_data(G_OBJECT(wf), "wf");
     d->drag_x     = sx;
+    if (d->on_scrub)
+        d->on_scrub(wf, TRUE, d->user);
     scrub_to(wf, sx);
+}
+
+static void
+on_drag_end(GtkGestureDrag *g, double ox, double oy, gpointer user)
+{
+    GtkWidget *wf = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
+    WfData    *d  = g_object_get_data(G_OBJECT(wf), "wf");
+    if (d->on_scrub)
+        d->on_scrub(wf, FALSE, d->user);
 }
 
 static void
@@ -176,7 +199,7 @@ on_drag_update(GtkGestureDrag *g, double ox, double oy, gpointer user)
 }
 
 GtkWidget *
-waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
+waveform_new(Track *t, WaveformClickFn on_click, WaveformScrubFn on_scrub, gpointer user)
 {
     GtkWidget *area = gtk_drawing_area_new();
     gtk_widget_set_size_request(area, -1, 80); // min height; grows with the window
@@ -196,6 +219,7 @@ waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
     WfData *d   = g_new0(WfData, 1);
     d->track    = t;
     d->on_click = on_click;
+    d->on_scrub = on_scrub;
     d->user     = user;
     g_object_set_data_full(G_OBJECT(area), "wf", d, g_free);
 
@@ -204,6 +228,7 @@ waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
     GtkGesture *drag = gtk_gesture_drag_new();
     g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), NULL);
     g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), NULL);
+    g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), NULL);
     gtk_widget_add_controller(area, GTK_EVENT_CONTROLLER(drag));
 
     return area;

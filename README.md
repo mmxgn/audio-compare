@@ -19,6 +19,8 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
   All tracks on the active bus play together, mixed and in sample-accurate sync,
   so you can A/B two busses. Busses are shown by a coloured border and a
   numbered badge; ungrouped tracks play on their own.
+- Invert a track's polarity (×−1) to line it up against another for null tests;
+  the waveform flips to show it.
 
 | Shortcut | Action |
 |---|---|
@@ -26,6 +28,7 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
 | `Alt+↑` / `Alt+↓` | Switch to the file above / below (keeps position) |
 | `←` / `→` | Seek ∓5 s (`Shift` ∓1 s, `Ctrl` ∓100 ms) |
 | `0`–`9` (over a pane) | Assign the track to that bus (same key again unassigns) |
+| `-` / `i` (over a pane) | Invert the track's polarity (×−1) |
 | Click a pane | Switch to it, keeping the position |
 | Click + drag | Scrub the active pane |
 
