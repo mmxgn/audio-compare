@@ -9,7 +9,8 @@ typedef struct {
     GtkWidget *list;        // vertical GtkBox of waveform panes
     GtkWidget *placeholder; // shown while empty
     GPtrArray *tracks;      // Track*
-    GPtrArray *waves;       // GtkWidget*, parallel to tracks
+    GPtrArray *waves;       // GtkWidget* drawing area, parallel to tracks
+    GPtrArray *rows;        // GtkWidget* pane container, parallel to tracks
     int        active;      // -1 if none
     gboolean   playing;
 } App;
@@ -65,6 +66,47 @@ static void on_wave_click(GtkWidget *wf, double frac, gpointer user)
     track_seek(t, (gint64) (frac * t->duration));
 }
 
+static void show_placeholder(void)
+{
+    app.placeholder = adw_status_page_new();
+    adw_status_page_set_title(ADW_STATUS_PAGE(app.placeholder), "Drop audio files here");
+    adw_status_page_set_description(ADW_STATUS_PAGE(app.placeholder),
+                                    "or use Open. Space plays, Alt+Up/Down switches.");
+    gtk_widget_set_vexpand(app.placeholder, TRUE);
+    gtk_box_append(GTK_BOX(app.list), app.placeholder);
+}
+
+static void remove_track(GtkWidget *row)
+{
+    guint i;
+    if (!g_ptr_array_find(app.rows, row, &i))
+        return;
+
+    gboolean was_active = ((int) i == app.active);
+    track_free(g_ptr_array_index(app.tracks, i));
+    gtk_box_remove(GTK_BOX(app.list), row);
+    g_ptr_array_remove_index(app.tracks, i);
+    g_ptr_array_remove_index(app.waves, i);
+    g_ptr_array_remove_index(app.rows, i);
+
+    if (app.tracks->len == 0) {
+        app.active  = -1;
+        app.playing = FALSE;
+        show_placeholder();
+    } else if (was_active) {
+        app.active = -1; // set_active seeks the new track from position 0
+        set_active(MIN(i, app.tracks->len - 1));
+    } else if ((int) i < app.active) {
+        app.active--;
+    }
+    update_borders();
+}
+
+static void on_close(GtkButton *b, gpointer row)
+{
+    remove_track(row);
+}
+
 static void add_track(const char *uri)
 {
     Track *t = track_new(uri);
@@ -72,7 +114,25 @@ static void add_track(const char *uri)
 
     GtkWidget *wf = waveform_new(t, on_wave_click, NULL);
     g_ptr_array_add(app.waves, wf);
-    gtk_box_append(GTK_BOX(app.list), wf);
+
+    // Overlay a close button on the top-right of the pane.
+    GtkWidget *row = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(row), wf);
+
+    GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(close, "osd");
+    gtk_widget_add_css_class(close, "circular");
+    gtk_widget_set_focusable(close, FALSE);
+    gtk_widget_set_halign(close, GTK_ALIGN_END);
+    gtk_widget_set_valign(close, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(close, 4);
+    gtk_widget_set_margin_end(close, 4);
+    gtk_widget_set_tooltip_text(close, t->name);
+    g_signal_connect(close, "clicked", G_CALLBACK(on_close), row);
+    gtk_overlay_add_overlay(GTK_OVERLAY(row), close);
+
+    g_ptr_array_add(app.rows, row);
+    gtk_box_append(GTK_BOX(app.list), row);
 
     if (app.placeholder) {
         gtk_box_remove(GTK_BOX(app.list), app.placeholder);
@@ -162,6 +222,7 @@ static void activate(GtkApplication *gapp, gpointer user)
 {
     app.tracks = g_ptr_array_new();
     app.waves  = g_ptr_array_new();
+    app.rows   = g_ptr_array_new();
     app.active = -1;
 
     GtkWidget *win = adw_application_window_new(gapp);
@@ -181,12 +242,7 @@ static void activate(GtkApplication *gapp, gpointer user)
     gtk_widget_set_margin_start(app.list, 6);
     gtk_widget_set_margin_end(app.list, 6);
 
-    app.placeholder = adw_status_page_new();
-    adw_status_page_set_title(ADW_STATUS_PAGE(app.placeholder), "Drop audio files here");
-    adw_status_page_set_description(ADW_STATUS_PAGE(app.placeholder),
-                                    "or use Open. Space plays, Alt+Up/Down switches.");
-    gtk_widget_set_vexpand(app.placeholder, TRUE);
-    gtk_box_append(GTK_BOX(app.list), app.placeholder);
+    show_placeholder();
 
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app.list);
