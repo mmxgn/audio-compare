@@ -1,0 +1,126 @@
+#include "track.h"
+
+#include <gio/gio.h>
+#include <gst/app/gstappsink.h>
+
+#define SAMPLES_PER_PEAK 512
+
+// ponytail: blocking decode on the calling thread. TDD open question --
+// move to a worker if large files stall the UI.
+static void extract_peaks(Track *t)
+{
+    char *desc = g_strdup_printf(
+        "uridecodebin uri=\"%s\" ! audioconvert ! audioresample ! "
+        "audio/x-raw,format=F32LE,channels=1 ! appsink name=sink sync=false",
+        t->uri);
+    GError     *err  = NULL;
+    GstElement *pipe = gst_parse_launch(desc, &err);
+    g_free(desc);
+    if (!pipe) {
+        g_warning("peaks: %s", err ? err->message : "parse failed");
+        g_clear_error(&err);
+        return;
+    }
+
+    GstAppSink *sink = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(pipe), "sink"));
+    gst_element_set_state(pipe, GST_STATE_PLAYING);
+
+    float cmin = 0, cmax = 0;
+    int   count = 0;
+    for (;;) {
+        GstSample *sample = gst_app_sink_pull_sample(sink);
+        if (!sample)
+            break; // EOS or error
+        GstBuffer *buf = gst_sample_get_buffer(sample);
+        GstMapInfo map;
+        if (gst_buffer_map(buf, &map, GST_MAP_READ)) {
+            float *data = (float *) map.data;
+            guint  n    = map.size / sizeof(float);
+            for (guint i = 0; i < n; i++) {
+                float v = data[i];
+                if (count == 0) {
+                    cmin = cmax = v;
+                } else {
+                    if (v < cmin)
+                        cmin = v;
+                    if (v > cmax)
+                        cmax = v;
+                }
+                if (++count >= SAMPLES_PER_PEAK) {
+                    Peak p = { cmin, cmax };
+                    g_array_append_val(t->peaks, p);
+                    count = 0;
+                }
+            }
+            gst_buffer_unmap(buf, &map);
+        }
+        gst_sample_unref(sample);
+    }
+    if (count > 0) {
+        Peak p = { cmin, cmax };
+        g_array_append_val(t->peaks, p);
+    }
+
+    gst_object_unref(sink);
+    gst_element_set_state(pipe, GST_STATE_NULL);
+    gst_object_unref(pipe);
+}
+
+Track *track_new(const char *uri)
+{
+    Track *t    = g_new0(Track, 1);
+    t->uri      = g_strdup(uri);
+    t->peaks    = g_array_new(FALSE, FALSE, sizeof(Peak));
+    t->duration = -1;
+
+    GFile *f = g_file_new_for_uri(uri);
+    t->name  = g_file_get_basename(f);
+    g_object_unref(f);
+
+    extract_peaks(t);
+
+    t->pipeline = gst_element_factory_make("playbin", NULL);
+    g_object_set(t->pipeline, "uri", t->uri, NULL);
+
+    // Preroll to PAUSED so duration is queryable.
+    gst_element_set_state(t->pipeline, GST_STATE_PAUSED);
+    gst_element_get_state(t->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE);
+    gst_element_query_duration(t->pipeline, GST_FORMAT_TIME, &t->duration);
+
+    return t;
+}
+
+void track_free(Track *t)
+{
+    if (!t)
+        return;
+    gst_element_set_state(t->pipeline, GST_STATE_NULL);
+    gst_object_unref(t->pipeline);
+    g_array_free(t->peaks, TRUE);
+    g_free(t->name);
+    g_free(t->uri);
+    g_free(t);
+}
+
+void track_play(Track *t)
+{
+    gst_element_set_state(t->pipeline, GST_STATE_PLAYING);
+}
+
+void track_pause(Track *t)
+{
+    gst_element_set_state(t->pipeline, GST_STATE_PAUSED);
+}
+
+gint64 track_position(Track *t)
+{
+    gint64 pos = -1;
+    gst_element_query_position(t->pipeline, GST_FORMAT_TIME, &pos);
+    return pos;
+}
+
+void track_seek(Track *t, gint64 pos)
+{
+    gst_element_seek_simple(t->pipeline, GST_FORMAT_TIME,
+                            GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT, pos);
+}
