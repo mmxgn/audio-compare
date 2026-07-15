@@ -1,3 +1,5 @@
+#include <adwaita.h>
+
 #include "waveform.h"
 
 typedef struct {
@@ -14,14 +16,17 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     double  mid = h / 2.0;
     double  amp = mid * 0.9;
 
-    // background
-    cairo_set_source_rgb(cr, 0.11, 0.11, 0.13);
-    cairo_paint(cr);
+    // Themed background comes from the "view" CSS class; content uses the
+    // accent colour so it follows the light/dark scheme.
+    AdwStyleManager *sm = adw_style_manager_get_default();
+    GdkRGBA          acc;
+    adw_accent_color_to_standalone_rgba(adw_style_manager_get_accent_color(sm),
+                                        adw_style_manager_get_dark(sm), &acc);
 
     // waveform: one vertical line per pixel column
     GArray *peaks = d->track->peaks;
     if (peaks->len > 0) {
-        cairo_set_source_rgb(cr, 0.30, 0.75, 0.72);
+        cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
         cairo_set_line_width(cr, 1.0);
         for (int x = 0; x < w; x++) {
             guint i0 = (guint) ((gint64) x * peaks->len / w);
@@ -45,7 +50,7 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     }
 
     // caption: filename, top-left, same colour as the waveform
-    cairo_set_source_rgb(cr, 0.30, 0.75, 0.72);
+    cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
     cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, 11);
     cairo_move_to(cr, 6, 15);
@@ -61,7 +66,7 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
 
     // active border
     if (d->active) {
-        cairo_set_source_rgb(cr, 0.30, 0.60, 0.95);
+        cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
         cairo_set_line_width(cr, 2.0);
         cairo_rectangle(cr, 1, 1, w - 2, h - 2);
         cairo_stroke(cr);
@@ -83,6 +88,14 @@ GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
     gtk_widget_set_size_request(area, -1, 80); // min height; grows with the window
     gtk_widget_set_hexpand(area, TRUE);
     gtk_widget_set_vexpand(area, TRUE);
+    gtk_widget_add_css_class(area, "view"); // themed light/dark background
+
+    // Redraw when the scheme or accent colour changes.
+    AdwStyleManager *sm = adw_style_manager_get_default();
+    g_signal_connect_object(sm, "notify::dark", G_CALLBACK(gtk_widget_queue_draw), area,
+                            G_CONNECT_SWAPPED);
+    g_signal_connect_object(sm, "notify::accent-color", G_CALLBACK(gtk_widget_queue_draw), area,
+                            G_CONNECT_SWAPPED);
 
     WfData *d   = g_new0(WfData, 1);
     d->track    = t;
