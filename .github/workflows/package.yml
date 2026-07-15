@@ -32,6 +32,7 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           DEPLOY_GTK_VERSION: "4"
+          OUTPUT: audio-compare-${{ github.ref_name }}-x86_64.AppImage
         run: |
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
@@ -44,9 +45,6 @@ jobs:
             --plugin gtk \
             --plugin gstreamer \
             --output appimage
-
-      - name: Rename AppImage with version tag
-        run: mv audio-compare*.AppImage audio-compare-${{ github.ref_name }}-x86_64.AppImage
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -82,7 +80,8 @@ jobs:
 
       - name: Install deps
         run: |
-          dnf install -y meson ninja-build gcc rpm-build pkgconfig \
+          dnf install -y --setopt=install_weak_deps=False \
+            meson ninja-build gcc rpm-build pkgconfig \
             gtk4-devel libadwaita-devel \
             gstreamer1-devel gstreamer1-plugins-base-devel libebur128-devel
 
