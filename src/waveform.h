@@ -12,4 +12,5 @@ typedef void (*WaveformScrubFn)(GtkWidget *wf, gboolean active, gpointer user);
 GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, WaveformScrubFn on_scrub,
                         gpointer user);
 void       waveform_set_active(GtkWidget *wf, gboolean active);
-void       waveform_set_playhead(GtkWidget *wf, double frac); // 0..1
+void       waveform_set_dimmed(GtkWidget *wf, gboolean dimmed); // grey out (muted/solo-suppressed)
+void       waveform_set_playhead(GtkWidget *wf, double frac);   // 0..1

@@ -37,10 +37,23 @@ is_audible(int i)
 static void
 apply_audible(void)
 {
+    // Solo is scoped to the audible set: if any of its tracks is soloed, only
+    // the soloed ones play.
+    gboolean any_solo = FALSE;
     for (guint i = 0; i < app.tracks->len; i++) {
-        gboolean on = is_audible((int)i);
-        player_set_audible(g_ptr_array_index(app.tracks, i), on);
-        waveform_set_active(g_ptr_array_index(app.waves, i), on);
+        Track *t = g_ptr_array_index(app.tracks, i);
+        if (is_audible((int)i) && t->soloed)
+            any_solo = TRUE;
+    }
+
+    for (guint i = 0; i < app.tracks->len; i++) {
+        Track   *t    = g_ptr_array_index(app.tracks, i);
+        gboolean aud  = is_audible((int)i);
+        gboolean play = aud && !t->muted && (!any_solo || t->soloed);
+        player_set_audible(t, play);
+        waveform_set_active(g_ptr_array_index(app.waves, i), aud);
+        waveform_set_dimmed(g_ptr_array_index(app.waves, i),
+                            t->muted || (aud && any_solo && !t->soloed));
     }
 }
 
@@ -313,6 +326,26 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
             t->inverted = !t->inverted;
             player_set_inverted(t, t->inverted);
             gtk_widget_queue_draw(g_ptr_array_index(app.waves, i));
+            return TRUE;
+        }
+    }
+    // 'm' over a pane: mute/unmute that track.
+    if (keyval == GDK_KEY_m) {
+        guint i;
+        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+            Track *t = g_ptr_array_index(app.tracks, i);
+            t->muted = !t->muted;
+            apply_audible();
+            return TRUE;
+        }
+    }
+    // 's' over a pane: solo/unsolo that track within its bus.
+    if (keyval == GDK_KEY_s) {
+        guint i;
+        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+            Track *t  = g_ptr_array_index(app.tracks, i);
+            t->soloed = !t->soloed;
+            apply_audible();
             return TRUE;
         }
     }

@@ -29,6 +29,8 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
 | `←` / `→` | Seek ∓5 s (`Shift` ∓1 s, `Ctrl` ∓100 ms) |
 | `0`–`9` (over a pane) | Assign the track to that bus (same key again unassigns) |
 | `-` / `i` (over a pane) | Invert the track's polarity (×−1) |
+| `m` (over a pane) | Mute / unmute the track |
+| `s` (over a pane) | Solo the track within its bus |
 | Click a pane | Switch to it, keeping the position |
 | Click + drag | Scrub the active pane |
 
