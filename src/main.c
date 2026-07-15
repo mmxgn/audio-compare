@@ -107,6 +107,32 @@ static void on_close(GtkButton *b, gpointer row)
     remove_track(row);
 }
 
+#define PANE_H 160 // preferred height per waveform pane
+
+// Grow the window so each pane keeps a comfortable height, capped to the
+// monitor. Never shrinks -- scrolling covers the overflow past the cap.
+static void fit_window(void)
+{
+    int want = 46 + 12 + (int) app.tracks->len * (PANE_H + 6); // header + margins + panes
+
+    int         cap = 1000;
+    GdkDisplay *dpy = gtk_widget_get_display(GTK_WIDGET(app.win));
+    GdkMonitor *mon = g_list_model_get_item(gdk_display_get_monitors(dpy), 0);
+    if (mon) {
+        GdkRectangle geo;
+        gdk_monitor_get_geometry(mon, &geo);
+        cap = geo.height * 0.9;
+        g_object_unref(mon);
+    }
+    if (want > cap)
+        want = cap;
+
+    int w = gtk_widget_get_width(GTK_WIDGET(app.win));
+    int h = gtk_widget_get_height(GTK_WIDGET(app.win));
+    if (want > h)
+        gtk_window_set_default_size(app.win, w > 0 ? w : 800, want);
+}
+
 static void add_track(const char *uri)
 {
     Track *t = track_new(uri);
@@ -140,6 +166,7 @@ static void add_track(const char *uri)
     }
     if (app.active < 0)
         set_active(0);
+    fit_window();
 }
 
 static gboolean tick(gpointer user)
