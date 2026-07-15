@@ -8,7 +8,7 @@ typedef struct {
 
 typedef struct {
     char       *uri;
-    char       *name;     // basename, for display
+    char       *name;      // basename, for display
     GstElement *pipeline;  // playbin
     guint       bus_watch; // bus watch source id
     GArray     *peaks;     // of Peak, one per SAMPLES_PER_PEAK samples

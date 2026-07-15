@@ -6,11 +6,12 @@
 #include <math.h>
 
 #define SAMPLES_PER_PEAK 512
-#define ANALYZE_RATE     48000
+#define ANALYZE_RATE 48000
 
 // ponytail: blocking decode on the calling thread. TDD open question --
 // move to a worker if large files stall the UI.
-static void extract_peaks(Track *t)
+static void
+extract_peaks(Track *t)
 {
     char *desc = g_strdup_printf(
         "uridecodebin uri=\"%s\" ! audioconvert ! audioresample ! "
@@ -30,8 +31,7 @@ static void extract_peaks(Track *t)
 
     // ponytail: loudness measured on the mono downmix -- consistent across
     // files, not the per-channel R128 spec. Good enough for comparing by ear.
-    ebur128_state *r128 =
-        ebur128_init(1, ANALYZE_RATE, EBUR128_MODE_I | EBUR128_MODE_TRUE_PEAK);
+    ebur128_state *r128 = ebur128_init(1, ANALYZE_RATE, EBUR128_MODE_I | EBUR128_MODE_TRUE_PEAK);
 
     float cmin = 0, cmax = 0;
     int   count = 0;
@@ -42,7 +42,7 @@ static void extract_peaks(Track *t)
         GstBuffer *buf = gst_sample_get_buffer(sample);
         GstMapInfo map;
         if (gst_buffer_map(buf, &map, GST_MAP_READ)) {
-            float *data = (float *) map.data;
+            float *data = (float *)map.data;
             guint  n    = map.size / sizeof(float);
             ebur128_add_frames_float(r128, data, n);
             for (guint i = 0; i < n; i++) {
@@ -82,7 +82,8 @@ static void extract_peaks(Track *t)
 }
 
 // Loop: seek back to the start when playback reaches the end.
-static gboolean on_bus(GstBus *bus, GstMessage *msg, gpointer user)
+static gboolean
+on_bus(GstBus *bus, GstMessage *msg, gpointer user)
 {
     Track *t = user;
     if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS)
@@ -90,7 +91,8 @@ static gboolean on_bus(GstBus *bus, GstMessage *msg, gpointer user)
     return TRUE;
 }
 
-Track *track_new(const char *uri)
+Track *
+track_new(const char *uri)
 {
     Track *t    = g_new0(Track, 1);
     t->uri      = g_strdup(uri);
@@ -108,8 +110,8 @@ Track *track_new(const char *uri)
     t->pipeline = gst_element_factory_make("playbin", NULL);
     g_object_set(t->pipeline, "uri", t->uri, NULL);
 
-    GstBus *bus   = gst_element_get_bus(t->pipeline);
-    t->bus_watch  = gst_bus_add_watch(bus, on_bus, t);
+    GstBus *bus  = gst_element_get_bus(t->pipeline);
+    t->bus_watch = gst_bus_add_watch(bus, on_bus, t);
     gst_object_unref(bus);
 
     // Preroll to PAUSED so duration is queryable.
@@ -120,7 +122,8 @@ Track *track_new(const char *uri)
     return t;
 }
 
-void track_free(Track *t)
+void
+track_free(Track *t)
 {
     if (!t)
         return;
@@ -134,24 +137,28 @@ void track_free(Track *t)
     g_free(t);
 }
 
-void track_play(Track *t)
+void
+track_play(Track *t)
 {
     gst_element_set_state(t->pipeline, GST_STATE_PLAYING);
 }
 
-void track_pause(Track *t)
+void
+track_pause(Track *t)
 {
     gst_element_set_state(t->pipeline, GST_STATE_PAUSED);
 }
 
-gint64 track_position(Track *t)
+gint64
+track_position(Track *t)
 {
     gint64 pos = -1;
     gst_element_query_position(t->pipeline, GST_FORMAT_TIME, &pos);
     return pos;
 }
 
-void track_seek(Track *t, gint64 pos)
+void
+track_seek(Track *t, gint64 pos)
 {
     gst_element_seek_simple(t->pipeline, GST_FORMAT_TIME,
                             GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT, pos);

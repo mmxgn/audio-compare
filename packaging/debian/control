@@ -1,0 +1,15 @@
+Source: audio-compare
+Section: sound
+Priority: optional
+Maintainer: mmxgn
+Build-Depends: debhelper-compat (= 13), meson, ninja-build, gcc,
+  libgtk-4-dev, libadwaita-1-dev,
+  libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libebur128-dev
+
+Package: audio-compare
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+  gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad
+Description: Compare audio files by ear on GNOME
+ Load two or more audio files, see their waveforms, and A/B them at the
+ same playback position.

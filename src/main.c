@@ -17,15 +17,17 @@ typedef struct {
 
 static App app;
 
-static void update_borders(void)
+static void
+update_borders(void)
 {
     for (guint i = 0; i < app.waves->len; i++)
-        waveform_set_active(g_ptr_array_index(app.waves, i), (int) i == app.active);
+        waveform_set_active(g_ptr_array_index(app.waves, i), (int)i == app.active);
 }
 
-static void set_active(int b)
+static void
+set_active(int b)
 {
-    if (b < 0 || b >= (int) app.tracks->len || b == app.active)
+    if (b < 0 || b >= (int)app.tracks->len || b == app.active)
         return;
 
     gint64 pos = 0;
@@ -44,7 +46,8 @@ static void set_active(int b)
     update_borders();
 }
 
-static void toggle_play(void)
+static void
+toggle_play(void)
 {
     if (app.active < 0)
         return;
@@ -56,17 +59,19 @@ static void toggle_play(void)
         track_pause(t);
 }
 
-static void on_wave_click(GtkWidget *wf, double frac, gpointer user)
+static void
+on_wave_click(GtkWidget *wf, double frac, gpointer user)
 {
     guint i;
     if (!g_ptr_array_find(app.waves, wf, &i))
         return;
-    set_active((int) i);
+    set_active((int)i);
     Track *t = g_ptr_array_index(app.tracks, i);
-    track_seek(t, (gint64) (frac * t->duration));
+    track_seek(t, (gint64)(frac * t->duration));
 }
 
-static void show_placeholder(void)
+static void
+show_placeholder(void)
 {
     app.placeholder = adw_status_page_new();
     adw_status_page_set_title(ADW_STATUS_PAGE(app.placeholder), "Drop audio files here");
@@ -76,13 +81,14 @@ static void show_placeholder(void)
     gtk_box_append(GTK_BOX(app.list), app.placeholder);
 }
 
-static void remove_track(GtkWidget *row)
+static void
+remove_track(GtkWidget *row)
 {
     guint i;
     if (!g_ptr_array_find(app.rows, row, &i))
         return;
 
-    gboolean was_active = ((int) i == app.active);
+    gboolean was_active = ((int)i == app.active);
     track_free(g_ptr_array_index(app.tracks, i));
     gtk_box_remove(GTK_BOX(app.list), row);
     g_ptr_array_remove_index(app.tracks, i);
@@ -96,13 +102,14 @@ static void remove_track(GtkWidget *row)
     } else if (was_active) {
         app.active = -1; // set_active seeks the new track from position 0
         set_active(MIN(i, app.tracks->len - 1));
-    } else if ((int) i < app.active) {
+    } else if ((int)i < app.active) {
         app.active--;
     }
     update_borders();
 }
 
-static void on_close(GtkButton *b, gpointer row)
+static void
+on_close(GtkButton *b, gpointer row)
 {
     remove_track(row);
 }
@@ -111,9 +118,10 @@ static void on_close(GtkButton *b, gpointer row)
 
 // Grow the window so each pane keeps a comfortable height, capped to the
 // monitor. Never shrinks -- scrolling covers the overflow past the cap.
-static void fit_window(void)
+static void
+fit_window(void)
 {
-    int want = 46 + 12 + (int) app.tracks->len * (PANE_H + 6); // header + margins + panes
+    int want = 46 + 12 + (int)app.tracks->len * (PANE_H + 6); // header + margins + panes
 
     int         cap = 1000;
     GdkDisplay *dpy = gtk_widget_get_display(GTK_WIDGET(app.win));
@@ -133,7 +141,8 @@ static void fit_window(void)
         gtk_window_set_default_size(app.win, w > 0 ? w : 800, want);
 }
 
-static void add_track(const char *uri)
+static void
+add_track(const char *uri)
 {
     Track *t = track_new(uri);
     g_ptr_array_add(app.tracks, t);
@@ -169,7 +178,8 @@ static void add_track(const char *uri)
     fit_window();
 }
 
-static gboolean tick(gpointer user)
+static gboolean
+tick(gpointer user)
 {
     if (app.active >= 0) {
         Track *t   = g_ptr_array_index(app.tracks, app.active);
@@ -177,7 +187,7 @@ static gboolean tick(gpointer user)
         if (pos >= 0) {
             for (guint i = 0; i < app.waves->len; i++) {
                 Track *ti   = g_ptr_array_index(app.tracks, i);
-                double frac = ti->duration > 0 ? (double) pos / ti->duration : 0;
+                double frac = ti->duration > 0 ? (double)pos / ti->duration : 0;
                 waveform_set_playhead(g_ptr_array_index(app.waves, i), frac);
             }
         }
@@ -185,8 +195,8 @@ static gboolean tick(gpointer user)
     return G_SOURCE_CONTINUE;
 }
 
-static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint code,
-                       GdkModifierType state, gpointer user)
+static gboolean
+on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state, gpointer user)
 {
     if (keyval == GDK_KEY_space) {
         toggle_play();
@@ -205,9 +215,10 @@ static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint code,
     return FALSE;
 }
 
-static void on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
+static void
+on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
 {
-    GError    *err   = NULL;
+    GError     *err   = NULL;
     GListModel *files = gtk_file_dialog_open_multiple_finish(GTK_FILE_DIALOG(src), res, &err);
     if (!files) {
         g_clear_error(&err);
@@ -224,14 +235,16 @@ static void on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
     g_object_unref(files);
 }
 
-static void on_open(GtkButton *b, gpointer user)
+static void
+on_open(GtkButton *b, gpointer user)
 {
     GtkFileDialog *d = gtk_file_dialog_new();
     gtk_file_dialog_open_multiple(d, app.win, NULL, on_files_chosen, NULL);
     g_object_unref(d);
 }
 
-static gboolean on_drop(GtkDropTarget *t, const GValue *value, double x, double y, gpointer user)
+static gboolean
+on_drop(GtkDropTarget *t, const GValue *value, double x, double y, gpointer user)
 {
     if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
         return FALSE;
@@ -245,7 +258,8 @@ static gboolean on_drop(GtkDropTarget *t, const GValue *value, double x, double 
     return TRUE;
 }
 
-static void activate(GtkApplication *gapp, gpointer user)
+static void
+activate(GtkApplication *gapp, gpointer user)
 {
     app.tracks = g_ptr_array_new();
     app.waves  = g_ptr_array_new();
@@ -297,7 +311,8 @@ static void activate(GtkApplication *gapp, gpointer user)
     gtk_window_present(app.win);
 }
 
-int main(int argc, char **argv)
+int
+main(int argc, char **argv)
 {
     gst_init(&argc, &argv);
     AdwApplication *a = adw_application_new("org.mmxgn.audiocompare", G_APPLICATION_DEFAULT_FLAGS);

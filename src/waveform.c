@@ -12,7 +12,8 @@ typedef struct {
     gpointer        user;
 } WfData;
 
-static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
+static void
+draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
 {
     WfData *d   = user;
     double  mid = h / 2.0;
@@ -31,8 +32,8 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
         cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
         cairo_set_line_width(cr, 1.0);
         for (int x = 0; x < w; x++) {
-            guint i0 = (guint) ((gint64) x * peaks->len / w);
-            guint i1 = (guint) ((gint64) (x + 1) * peaks->len / w);
+            guint i0 = (guint)((gint64)x * peaks->len / w);
+            guint i1 = (guint)((gint64)(x + 1) * peaks->len / w);
             if (i1 <= i0)
                 i1 = i0 + 1;
             if (i1 > peaks->len)
@@ -92,7 +93,8 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     }
 }
 
-static void scrub_to(GtkWidget *wf, double x)
+static void
+scrub_to(GtkWidget *wf, double x)
 {
     WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
     int     w = gtk_widget_get_width(wf);
@@ -100,7 +102,8 @@ static void scrub_to(GtkWidget *wf, double x)
         d->on_click(wf, CLAMP(x / w, 0.0, 1.0), d->user);
 }
 
-static void on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer user)
+static void
+on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer user)
 {
     GtkWidget *wf = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
     WfData    *d  = g_object_get_data(G_OBJECT(wf), "wf");
@@ -108,14 +111,16 @@ static void on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer user
     scrub_to(wf, sx);
 }
 
-static void on_drag_update(GtkGestureDrag *g, double ox, double oy, gpointer user)
+static void
+on_drag_update(GtkGestureDrag *g, double ox, double oy, gpointer user)
 {
     GtkWidget *wf = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
     WfData    *d  = g_object_get_data(G_OBJECT(wf), "wf");
     scrub_to(wf, d->drag_x + ox);
 }
 
-GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
+GtkWidget *
+waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
 {
     GtkWidget *area = gtk_drawing_area_new();
     gtk_widget_set_size_request(area, -1, 80); // min height; grows with the window
@@ -146,7 +151,8 @@ GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
     return area;
 }
 
-void waveform_set_active(GtkWidget *wf, gboolean active)
+void
+waveform_set_active(GtkWidget *wf, gboolean active)
 {
     WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
     if (d->active != active) {
@@ -155,7 +161,8 @@ void waveform_set_active(GtkWidget *wf, gboolean active)
     }
 }
 
-void waveform_set_playhead(GtkWidget *wf, double frac)
+void
+waveform_set_playhead(GtkWidget *wf, double frac)
 {
     WfData *d   = g_object_get_data(G_OBJECT(wf), "wf");
     d->playhead = frac;
