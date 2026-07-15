@@ -262,6 +262,10 @@ on_drop(GtkDropTarget *t, const GValue *value, double x, double y, gpointer user
 static void
 activate(GtkApplication *gapp, gpointer user)
 {
+    if (app.win) {
+        gtk_window_present(app.win);
+        return;
+    }
     app.tracks = g_ptr_array_new();
     app.waves  = g_ptr_array_new();
     app.rows   = g_ptr_array_new();
@@ -312,6 +316,20 @@ activate(GtkApplication *gapp, gpointer user)
     gtk_window_present(app.win);
 }
 
+// Launched with files (e.g. "Open with"): load them and start playing.
+static void
+on_app_open(GApplication *gapp, GFile **files, gint n_files, const gchar *hint, gpointer user)
+{
+    activate(GTK_APPLICATION(gapp), NULL);
+    for (gint i = 0; i < n_files; i++) {
+        char *uri = g_file_get_uri(files[i]);
+        add_track(uri);
+        g_free(uri);
+    }
+    if (app.active >= 0 && !app.playing)
+        toggle_play();
+}
+
 // Tear down pipelines and sources before the main loop is gone, else
 // GStreamer crashes during shutdown.
 static void
@@ -332,8 +350,9 @@ int
 main(int argc, char **argv)
 {
     gst_init(&argc, &argv);
-    AdwApplication *a = adw_application_new("org.mmxgn.audiocompare", G_APPLICATION_DEFAULT_FLAGS);
+    AdwApplication *a = adw_application_new("org.mmxgn.audiocompare", G_APPLICATION_HANDLES_OPEN);
     g_signal_connect(a, "activate", G_CALLBACK(activate), NULL);
+    g_signal_connect(a, "open", G_CALLBACK(on_app_open), NULL);
     g_signal_connect(a, "shutdown", G_CALLBACK(on_shutdown), NULL);
     int status = g_application_run(G_APPLICATION(a), argc, argv);
     g_object_unref(a);

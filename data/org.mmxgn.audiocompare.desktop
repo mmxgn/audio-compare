@@ -1,8 +1,9 @@
 [Desktop Entry]
 Name=Audio Compare
 Comment=Compare audio files by ear
-Exec=audio-compare
+Exec=audio-compare %F
 Icon=org.mmxgn.audiocompare
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;
+MimeType=audio/mpeg;audio/x-wav;audio/wav;audio/ogg;audio/x-vorbis+ogg;
