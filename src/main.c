@@ -10,6 +10,7 @@ typedef struct {
     GtkWidget *list;         // vertical GtkBox of waveform panes
     GtkWidget *placeholder;  // shown while empty
     GtkWidget *hovered_wave; // pane under the pointer, for bus assignment
+    gboolean   kbd_focus;    // last nav was keyboard: target the active track
     GPtrArray *tracks;       // Track*
     GPtrArray *waves;        // GtkWidget* drawing area, parallel to tracks
     GPtrArray *rows;         // GtkWidget* pane container, parallel to tracks
@@ -52,9 +53,26 @@ apply_audible(void)
         gboolean play = aud && !t->muted && (!any_solo || t->soloed);
         player_set_audible(t, play);
         waveform_set_active(g_ptr_array_index(app.waves, i), aud);
+        waveform_set_focused(g_ptr_array_index(app.waves, i), (int)i == app.active);
         waveform_set_dimmed(g_ptr_array_index(app.waves, i),
                             t->muted || (aud && any_solo && !t->soloed));
     }
+}
+
+// Per-track key actions follow the last input used: keyboard nav targets the
+// active track, moving the mouse over a pane targets that pane. A parked mouse
+// doesn't count, so Alt+nav then a key hits the track you navigated to.
+static gboolean
+target_track(guint *out)
+{
+    if (!app.kbd_focus && app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, out))
+        return TRUE;
+    if (app.active >= 0) {
+        *out = (guint)app.active;
+        return TRUE;
+    }
+    // last resort: whatever the mouse is over
+    return app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, out);
 }
 
 // One shared pipeline, so switching only changes which tracks are unmuted --
@@ -130,6 +148,8 @@ on_wave_click(GtkWidget *wf, double frac, gpointer user)
     guint i;
     if (!g_ptr_array_find(app.waves, wf, &i))
         return;
+    app.hovered_wave = wf;
+    app.kbd_focus    = FALSE;
     if ((int)i != app.active) {
         set_active((int)i); // switch panels, keep the playback position
         return;
@@ -227,10 +247,12 @@ on_wave_scrub(GtkWidget *wf, gboolean active, gpointer user)
     }
 }
 
+// Moving the mouse over a pane (enter or motion) switches to hover mode.
 static void
-on_wave_enter(GtkEventControllerMotion *m, double x, double y, gpointer wf)
+on_wave_point(GtkEventControllerMotion *m, double x, double y, gpointer wf)
 {
     app.hovered_wave = wf;
+    app.kbd_focus    = FALSE;
 }
 
 static void
@@ -251,7 +273,8 @@ add_track(const char *uri)
     g_ptr_array_add(app.waves, wf);
 
     GtkEventController *motion = gtk_event_controller_motion_new();
-    g_signal_connect(motion, "enter", G_CALLBACK(on_wave_enter), wf);
+    g_signal_connect(motion, "enter", G_CALLBACK(on_wave_point), wf);
+    g_signal_connect(motion, "motion", G_CALLBACK(on_wave_point), wf);
     g_signal_connect(motion, "leave", G_CALLBACK(on_wave_leave), wf);
     gtk_widget_add_controller(wf, motion);
 
@@ -309,7 +332,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
     // Digit over a pane: toggle that track's bus membership.
     if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9) {
         guint i;
-        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+        if (target_track(&i)) {
             Track *t = g_ptr_array_index(app.tracks, i);
             int    b = (int)(keyval - GDK_KEY_0);
             t->bus   = (t->bus == b) ? -1 : b;
@@ -321,7 +344,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
     // '-' or 'i' over a pane: invert that track's polarity.
     if (keyval == GDK_KEY_minus || keyval == GDK_KEY_i) {
         guint i;
-        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+        if (target_track(&i)) {
             Track *t    = g_ptr_array_index(app.tracks, i);
             t->inverted = !t->inverted;
             player_set_inverted(t, t->inverted);
@@ -332,7 +355,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
     // 'm' over a pane: mute/unmute that track.
     if (keyval == GDK_KEY_m) {
         guint i;
-        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+        if (target_track(&i)) {
             Track *t = g_ptr_array_index(app.tracks, i);
             t->muted = !t->muted;
             apply_audible();
@@ -342,7 +365,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
     // 's' over a pane: solo/unsolo that track within its bus.
     if (keyval == GDK_KEY_s) {
         guint i;
-        if (app.hovered_wave && g_ptr_array_find(app.waves, app.hovered_wave, &i)) {
+        if (target_track(&i)) {
             Track *t  = g_ptr_array_index(app.tracks, i);
             t->soloed = !t->soloed;
             apply_audible();
@@ -358,10 +381,12 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
     }
     if (state & GDK_ALT_MASK) {
         if (keyval == GDK_KEY_Up) {
+            app.kbd_focus = TRUE;
             set_active(app.active - 1);
             return TRUE;
         }
         if (keyval == GDK_KEY_Down) {
+            app.kbd_focus = TRUE;
             set_active(app.active + 1);
             return TRUE;
         }
