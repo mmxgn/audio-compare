@@ -63,8 +63,8 @@ A ~GTK~ tick queries the active position and redraws the playhead.
 * UI
 
 libadwaita window. Header bar with an Open button. Body is a vertical
-box of waveform panes, one per track. Active pane gets a visible border.
-Empty state: a drop hint.
+box of waveform panes, one per track. The active (currently playing)
+pane gets a visible border. Empty state: a drop hint.
 
 * Build / run
 
