@@ -67,6 +67,33 @@ toggle_play(void)
         player_pause();
 }
 
+// Rebuild the audio pipeline from scratch and re-attach every track, keeping
+// the bus assignments, position and play state. Recovers a wedged engine.
+static void
+reset_engine(void)
+{
+    gint64 pos = player_position();
+    if (pos < 0)
+        pos = 0;
+
+    player_shutdown();
+    player_init();
+    for (guint i = 0; i < app.tracks->len; i++)
+        player_add(g_ptr_array_index(app.tracks, i));
+
+    apply_audible();
+    if (pos > 0)
+        player_seek(pos);
+    if (app.playing)
+        player_play();
+}
+
+static void
+on_reset(GtkButton *b, gpointer user)
+{
+    reset_engine();
+}
+
 static void
 seek_relative(gint64 delta)
 {
@@ -347,8 +374,15 @@ activate(GtkApplication *gapp, gpointer user)
     GtkWidget *open = gtk_button_new_with_label("Open");
     g_signal_connect(open, "clicked", G_CALLBACK(on_open), NULL);
 
+    GtkWidget *reset = gtk_button_new_from_icon_name("view-refresh-symbolic");
+    gtk_widget_set_tooltip_text(reset, "Reset audio engine");
+    gtk_widget_set_focusable(reset, FALSE);
+    gtk_widget_add_css_class(reset, "destructive-action"); // red, stands out
+    g_signal_connect(reset, "clicked", G_CALLBACK(on_reset), NULL);
+
     GtkWidget *header = adw_header_bar_new();
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), open);
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), reset);
 
     app.list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_top(app.list, 6);
