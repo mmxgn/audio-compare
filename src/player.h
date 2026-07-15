@@ -12,7 +12,8 @@ void player_shutdown(void);
 void player_add(Track *t);    // build and attach the track's audio branch
 void player_remove(Track *t); // detach and tear down the track's branch
 
-void player_set_audible(Track *t, gboolean audible); // unmute / mute
+void player_set_audible(Track *t, gboolean audible);   // unmute / mute
+void player_set_inverted(Track *t, gboolean inverted); // polarity x-1
 
 void   player_play(void);
 void   player_pause(void);
