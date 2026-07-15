@@ -13,6 +13,8 @@ typedef struct {
     guint       bus_watch; // bus watch source id
     GArray     *peaks;     // of Peak, one per SAMPLES_PER_PEAK samples
     gint64      duration;  // ns, -1 if unknown
+    double      lufs;      // integrated loudness, -HUGE_VAL if silent
+    double      dbtp;      // max true peak in dBTP, -HUGE_VAL if silent
 } Track;
 
 Track *track_new(const char *uri);

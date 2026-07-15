@@ -16,11 +16,11 @@
         version = "0.1.0";
         src = pkgs.lib.cleanSource ./.;
         nativeBuildInputs = with pkgs; [ meson ninja pkg-config wrapGAppsHook4 ];
-        buildInputs = [ pkgs.gtk4 pkgs.libadwaita ] ++ gst;
+        buildInputs = [ pkgs.gtk4 pkgs.libadwaita pkgs.libebur128 ] ++ gst;
       };
 
       devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ gcc pkg-config gtk4 libadwaita meson ninja ] ++ gst;
+        packages = with pkgs; [ gcc pkg-config gtk4 libadwaita libebur128 meson ninja ] ++ gst;
       };
     };
 }

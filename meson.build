@@ -5,6 +5,8 @@ deps = [
   dependency('libadwaita-1'),
   dependency('gstreamer-1.0'),
   dependency('gstreamer-app-1.0'),
+  dependency('libebur128'),
+  meson.get_compiler('c').find_library('m'),
 ]
 
 install_data('data/org.mmxgn.audiocompare.desktop',

@@ -1,4 +1,5 @@
 #include <adwaita.h>
+#include <math.h>
 
 #include "waveform.h"
 
@@ -55,6 +56,23 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     cairo_set_font_size(cr, 11);
     cairo_move_to(cr, 6, 15);
     cairo_show_text(cr, d->track->name);
+
+    // loudness stats, top-right (leaving room for the close button)
+    char tp[24], lu[24], stats[52];
+    if (isfinite(d->track->dbtp))
+        g_snprintf(tp, sizeof tp, "%.1f dBTP", d->track->dbtp);
+    else
+        g_strlcpy(tp, "-inf dBTP", sizeof tp);
+    if (isfinite(d->track->lufs))
+        g_snprintf(lu, sizeof lu, "%.1f LUFS", d->track->lufs);
+    else
+        g_strlcpy(lu, "-inf LUFS", sizeof lu);
+    g_snprintf(stats, sizeof stats, "%s   %s", tp, lu);
+
+    cairo_text_extents_t ext;
+    cairo_text_extents(cr, stats, &ext);
+    cairo_move_to(cr, w - 44 - ext.width, 15);
+    cairo_show_text(cr, stats);
 
     // playhead
     double px = d->playhead * w;
