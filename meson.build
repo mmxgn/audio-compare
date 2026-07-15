@@ -18,5 +18,6 @@ install_data('data/icons/hicolor/scalable/apps/org.mmxgn.audiocompare.svg',
 executable('audio-compare', [
   'src/main.c',
   'src/track.c',
+  'src/player.c',
   'src/waveform.c',
 ], dependencies: deps, install: true)
