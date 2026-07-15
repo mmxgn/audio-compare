@@ -190,6 +190,8 @@ static void activate(GtkApplication *gapp, gpointer user)
 
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app.list);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER,
+                                   GTK_POLICY_AUTOMATIC);
     gtk_widget_set_vexpand(scroll, TRUE);
 
     GtkWidget *toolbar = adw_toolbar_view_new();
@@ -198,6 +200,8 @@ static void activate(GtkApplication *gapp, gpointer user)
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(win), toolbar);
 
     GtkEventController *keys = gtk_event_controller_key_new();
+    // Capture phase: intercept Space before the focused Open button consumes it.
+    gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
     g_signal_connect(keys, "key-pressed", G_CALLBACK(on_key), NULL);
     gtk_widget_add_controller(win, keys);
 

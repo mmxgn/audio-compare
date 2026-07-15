@@ -73,7 +73,9 @@ static void on_pressed(GtkGestureClick *g, int n, double x, double y, gpointer u
 GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
 {
     GtkWidget *area = gtk_drawing_area_new();
-    gtk_widget_set_size_request(area, -1, 120);
+    gtk_widget_set_size_request(area, -1, 80); // min height; grows with the window
+    gtk_widget_set_hexpand(area, TRUE);
+    gtk_widget_set_vexpand(area, TRUE);
 
     WfData *d   = g_new0(WfData, 1);
     d->track    = t;
