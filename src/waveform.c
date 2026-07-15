@@ -13,6 +13,7 @@ static const double BUS_PALETTE[10][3] = {
 typedef struct {
     Track          *track;
     gboolean        active;
+    gboolean        dimmed;   // greyed out (muted or solo-suppressed)
     double          playhead; // 0..1
     double          drag_x;   // press x, for drag scrubbing
     WaveformClickFn on_click;
@@ -39,10 +40,13 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     gtk_widget_get_color(GTK_WIDGET(area), &acc);
 #endif
 
-    // Inverted tracks show inverted colours: fill with the accent and draw
-    // content in a contrasting shade. Otherwise the "view" bg shows through.
+    // Muted tracks are greyed out. Inverted tracks show inverted colours: fill
+    // with the accent and draw content in a contrasting shade. Otherwise the
+    // "view" background shows through.
     GdkRGBA fg = acc;
-    if (d->track->inverted) {
+    if (d->dimmed) {
+        fg.red = fg.green = fg.blue = 0.5;
+    } else if (d->track->inverted) {
         cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
         cairo_paint(cr);
         double lum = 0.2126 * acc.red + 0.7152 * acc.green + 0.0722 * acc.blue;
@@ -240,6 +244,16 @@ waveform_set_active(GtkWidget *wf, gboolean active)
     WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
     if (d->active != active) {
         d->active = active;
+        gtk_widget_queue_draw(wf);
+    }
+}
+
+void
+waveform_set_dimmed(GtkWidget *wf, gboolean dimmed)
+{
+    WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
+    if (d->dimmed != dimmed) {
+        d->dimmed = dimmed;
         gtk_widget_queue_draw(wf);
     }
 }
