@@ -44,6 +44,13 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
         }
     }
 
+    // caption: filename, top-left, same colour as the waveform
+    cairo_set_source_rgb(cr, 0.30, 0.75, 0.72);
+    cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 11);
+    cairo_move_to(cr, 6, 15);
+    cairo_show_text(cr, d->track->name);
+
     // playhead
     double px = d->playhead * w;
     cairo_set_source_rgb(cr, 0.90, 0.30, 0.30);
