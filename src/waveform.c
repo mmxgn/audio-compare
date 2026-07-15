@@ -13,6 +13,7 @@ static const double BUS_PALETTE[10][3] = {
 typedef struct {
     Track          *track;
     gboolean        active;
+    gboolean        focused;  // the keyboard-focused pane (keys target it)
     gboolean        dimmed;   // greyed out (muted or solo-suppressed)
     double          playhead; // 0..1
     double          drag_x;   // press x, for drag scrubbing
@@ -163,6 +164,13 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
         cairo_move_to(cr, bx + pad - be.x_bearing, by + pad - be.y_bearing);
         cairo_show_text(cr, label);
     }
+
+    // focus indicator: accent bar down the left edge of the keyboard-focused pane
+    if (d->focused) {
+        cairo_set_source_rgb(cr, fg.red, fg.green, fg.blue);
+        cairo_rectangle(cr, 0, 0, 4, h);
+        cairo_fill(cr);
+    }
 }
 
 static void
@@ -244,6 +252,16 @@ waveform_set_active(GtkWidget *wf, gboolean active)
     WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
     if (d->active != active) {
         d->active = active;
+        gtk_widget_queue_draw(wf);
+    }
+}
+
+void
+waveform_set_focused(GtkWidget *wf, gboolean focused)
+{
+    WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
+    if (d->focused != focused) {
+        d->focused = focused;
         gtk_widget_queue_draw(wf);
     }
 }
