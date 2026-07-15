@@ -20,11 +20,16 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     double  amp = mid * 0.9;
 
     // Themed background comes from the "view" CSS class; content uses the
-    // accent colour so it follows the light/dark scheme.
+    // accent colour so it follows the light/dark scheme. The accent API needs
+    // libadwaita 1.6; older versions fall back to the theme foreground colour.
+    GdkRGBA acc;
+#if ADW_CHECK_VERSION(1, 6, 0)
     AdwStyleManager *sm = adw_style_manager_get_default();
-    GdkRGBA          acc;
     adw_accent_color_to_standalone_rgba(adw_style_manager_get_accent_color(sm),
                                         adw_style_manager_get_dark(sm), &acc);
+#else
+    gtk_widget_get_color(GTK_WIDGET(area), &acc);
+#endif
 
     // waveform: one vertical line per pixel column
     GArray *peaks = d->track->peaks;
@@ -153,8 +158,10 @@ waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
     AdwStyleManager *sm = adw_style_manager_get_default();
     g_signal_connect_object(sm, "notify::dark", G_CALLBACK(gtk_widget_queue_draw), area,
                             G_CONNECT_SWAPPED);
+#if ADW_CHECK_VERSION(1, 6, 0)
     g_signal_connect_object(sm, "notify::accent-color", G_CALLBACK(gtk_widget_queue_draw), area,
                             G_CONNECT_SWAPPED);
+#endif
 
     WfData *d   = g_new0(WfData, 1);
     d->track    = t;
