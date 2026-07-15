@@ -13,6 +13,7 @@ typedef struct {
     GPtrArray *rows;        // GtkWidget* pane container, parallel to tracks
     int        active;      // -1 if none
     gboolean   playing;
+    guint      tick_id;
 } App;
 
 static App app;
@@ -306,9 +307,25 @@ activate(GtkApplication *gapp, gpointer user)
     g_signal_connect(drop, "drop", G_CALLBACK(on_drop), NULL);
     gtk_widget_add_controller(win, GTK_EVENT_CONTROLLER(drop));
 
-    g_timeout_add(33, tick, NULL);
+    app.tick_id = g_timeout_add(33, tick, NULL);
 
     gtk_window_present(app.win);
+}
+
+// Tear down pipelines and sources before the main loop is gone, else
+// GStreamer crashes during shutdown.
+static void
+on_shutdown(GApplication *gapp, gpointer user)
+{
+    if (!app.tracks)
+        return;
+    if (app.tick_id)
+        g_source_remove(app.tick_id);
+    for (guint i = 0; i < app.tracks->len; i++)
+        track_free(g_ptr_array_index(app.tracks, i));
+    g_ptr_array_free(app.tracks, TRUE);
+    g_ptr_array_free(app.waves, TRUE);
+    g_ptr_array_free(app.rows, TRUE);
 }
 
 int
@@ -317,6 +334,7 @@ main(int argc, char **argv)
     gst_init(&argc, &argv);
     AdwApplication *a = adw_application_new("org.mmxgn.audiocompare", G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect(a, "activate", G_CALLBACK(activate), NULL);
+    g_signal_connect(a, "shutdown", G_CALLBACK(on_shutdown), NULL);
     int status = g_application_run(G_APPLICATION(a), argc, argv);
     g_object_unref(a);
     return status;
