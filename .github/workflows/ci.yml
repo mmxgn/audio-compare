@@ -1,0 +1,26 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          dnf install -y meson ninja-build gcc pkgconfig \
+            gtk4-devel libadwaita-devel \
+            gstreamer1-devel gstreamer1-plugins-base-devel libebur128-devel
+      - run: meson setup build && ninja -C build
+
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build gcc pkg-config \
+            libgtk-4-dev libadwaita-1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libebur128-dev
+      - run: meson setup build && ninja -C build

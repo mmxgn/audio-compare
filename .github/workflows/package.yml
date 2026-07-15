@@ -1,0 +1,53 @@
+name: Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build gcc pkg-config \
+            libgtk-4-dev libadwaita-1-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libebur128-dev \
+            gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+
+      - name: Build and install into AppDir
+        run: |
+          meson setup build --prefix=/usr
+          ninja -C build
+          DESTDIR="$PWD/AppDir" ninja -C build install
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          DEPLOY_GTK_VERSION: "4"
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gstreamer.sh
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/org.mmxgn.audiocompare.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/org.mmxgn.audiocompare.svg \
+            --plugin gtk \
+            --plugin gstreamer \
+            --output appimage
+
+      - name: Rename AppImage with version tag
+        run: mv audio-compare*.AppImage audio-compare-${{ github.ref_name }}-x86_64.AppImage
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: audio-compare-*.AppImage
