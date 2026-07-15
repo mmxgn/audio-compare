@@ -7,6 +7,12 @@ deps = [
   dependency('gstreamer-app-1.0'),
 ]
 
+install_data('data/org.mmxgn.audiocompare.desktop',
+  install_dir: join_paths(get_option('datadir'), 'applications'))
+
+install_data('data/icons/hicolor/scalable/apps/org.mmxgn.audiocompare.svg',
+  install_dir: join_paths(get_option('datadir'), 'icons', 'hicolor', 'scalable', 'apps'))
+
 executable('audio-compare', [
   'src/main.c',
   'src/track.c',

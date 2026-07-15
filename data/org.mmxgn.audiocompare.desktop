@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Audio Compare
+Comment=Compare audio files by ear
+Exec=audio-compare
+Icon=org.mmxgn.audiocompare
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;
