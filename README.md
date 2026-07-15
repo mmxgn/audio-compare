@@ -15,13 +15,19 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
 - Switching keeps the playback position, so you always compare the same moment.
 - Playback loops from the start on end.
 - Each pane shows integrated loudness (LUFS) and max true peak (dBTP).
+- Group tracks into **busses**: hover a track and press `0`–`9` to assign it.
+  All tracks on the active bus play together, mixed and in sample-accurate sync,
+  so you can A/B two busses. Busses are shown by a coloured border and a
+  numbered badge; ungrouped tracks play on their own.
 
 | Shortcut | Action |
 |---|---|
 | `Space` | Play / pause |
 | `Alt+↑` / `Alt+↓` | Switch to the file above / below (keeps position) |
-| Click a pane | Make it active and seek to that point |
-| Click + drag | Scrub |
+| `←` / `→` | Seek ∓5 s (`Shift` ∓1 s, `Ctrl` ∓100 ms) |
+| `0`–`9` (over a pane) | Assign the track to that bus (same key again unassigns) |
+| Click a pane | Switch to it, keeping the position |
+| Click + drag | Scrub the active pane |
 
 ## Install
 
