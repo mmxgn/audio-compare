@@ -25,7 +25,7 @@ static void update_borders(void)
 
 static void set_active(int b)
 {
-    if (b < 0 || b >= (int) app.tracks->len)
+    if (b < 0 || b >= (int) app.tracks->len || b == app.active)
         return;
 
     gint64 pos = 0;

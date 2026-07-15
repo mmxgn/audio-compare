@@ -7,6 +7,7 @@ typedef struct {
     Track          *track;
     gboolean        active;
     double          playhead; // 0..1
+    double          drag_x;   // press x, for drag scrubbing
     WaveformClickFn on_click;
     gpointer        user;
 } WfData;
@@ -91,13 +92,27 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     }
 }
 
-static void on_pressed(GtkGestureClick *g, int n, double x, double y, gpointer user)
+static void scrub_to(GtkWidget *wf, double x)
+{
+    WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
+    int     w = gtk_widget_get_width(wf);
+    if (d->on_click && w > 0)
+        d->on_click(wf, CLAMP(x / w, 0.0, 1.0), d->user);
+}
+
+static void on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer user)
 {
     GtkWidget *wf = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
     WfData    *d  = g_object_get_data(G_OBJECT(wf), "wf");
-    int        w  = gtk_widget_get_width(wf);
-    if (d->on_click && w > 0)
-        d->on_click(wf, CLAMP(x / w, 0.0, 1.0), d->user);
+    d->drag_x     = sx;
+    scrub_to(wf, sx);
+}
+
+static void on_drag_update(GtkGestureDrag *g, double ox, double oy, gpointer user)
+{
+    GtkWidget *wf = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g));
+    WfData    *d  = g_object_get_data(G_OBJECT(wf), "wf");
+    scrub_to(wf, d->drag_x + ox);
 }
 
 GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
@@ -123,9 +138,10 @@ GtkWidget *waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
 
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), draw, d, NULL);
 
-    GtkGesture *click = gtk_gesture_click_new();
-    g_signal_connect(click, "pressed", G_CALLBACK(on_pressed), NULL);
-    gtk_widget_add_controller(area, GTK_EVENT_CONTROLLER(click));
+    GtkGesture *drag = gtk_gesture_drag_new();
+    g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), NULL);
+    g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), NULL);
+    gtk_widget_add_controller(area, GTK_EVENT_CONTROLLER(drag));
 
     return area;
 }
