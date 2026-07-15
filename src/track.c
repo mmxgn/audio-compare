@@ -66,6 +66,15 @@ static void extract_peaks(Track *t)
     gst_object_unref(pipe);
 }
 
+// Loop: seek back to the start when playback reaches the end.
+static gboolean on_bus(GstBus *bus, GstMessage *msg, gpointer user)
+{
+    Track *t = user;
+    if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS)
+        gst_element_seek_simple(t->pipeline, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, 0);
+    return TRUE;
+}
+
 Track *track_new(const char *uri)
 {
     Track *t    = g_new0(Track, 1);
@@ -82,6 +91,10 @@ Track *track_new(const char *uri)
     t->pipeline = gst_element_factory_make("playbin", NULL);
     g_object_set(t->pipeline, "uri", t->uri, NULL);
 
+    GstBus *bus   = gst_element_get_bus(t->pipeline);
+    t->bus_watch  = gst_bus_add_watch(bus, on_bus, t);
+    gst_object_unref(bus);
+
     // Preroll to PAUSED so duration is queryable.
     gst_element_set_state(t->pipeline, GST_STATE_PAUSED);
     gst_element_get_state(t->pipeline, NULL, NULL, GST_CLOCK_TIME_NONE);
@@ -94,6 +107,8 @@ void track_free(Track *t)
 {
     if (!t)
         return;
+    if (t->bus_watch)
+        g_source_remove(t->bus_watch);
     gst_element_set_state(t->pipeline, GST_STATE_NULL);
     gst_object_unref(t->pipeline);
     g_array_free(t->peaks, TRUE);

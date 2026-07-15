@@ -9,9 +9,10 @@ typedef struct {
 typedef struct {
     char       *uri;
     char       *name;     // basename, for display
-    GstElement *pipeline; // playbin
-    GArray     *peaks;    // of Peak, one per SAMPLES_PER_PEAK samples
-    gint64      duration; // ns, -1 if unknown
+    GstElement *pipeline;  // playbin
+    guint       bus_watch; // bus watch source id
+    GArray     *peaks;     // of Peak, one per SAMPLES_PER_PEAK samples
+    gint64      duration;  // ns, -1 if unknown
 } Track;
 
 Track *track_new(const char *uri);
