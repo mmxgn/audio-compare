@@ -61,14 +61,34 @@ toggle_play(void)
 }
 
 static void
+seek_relative(gint64 delta)
+{
+    if (app.active < 0)
+        return;
+    Track *t   = g_ptr_array_index(app.tracks, app.active);
+    gint64 pos = track_position(t);
+    if (pos < 0)
+        pos = 0;
+    pos += delta;
+    if (pos < 0)
+        pos = 0;
+    if (t->duration > 0 && pos > t->duration)
+        pos = t->duration;
+    track_seek(t, pos);
+}
+
+static void
 on_wave_click(GtkWidget *wf, double frac, gpointer user)
 {
     guint i;
     if (!g_ptr_array_find(app.waves, wf, &i))
         return;
-    set_active((int)i);
+    if ((int)i != app.active) {
+        set_active((int)i); // switch panels, keep the playback position
+        return;
+    }
     Track *t = g_ptr_array_index(app.tracks, i);
-    track_seek(t, (gint64)(frac * t->duration));
+    track_seek(t, (gint64)(frac * t->duration)); // scrub within the active pane
 }
 
 static void
@@ -201,6 +221,13 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
 {
     if (keyval == GDK_KEY_space) {
         toggle_play();
+        return TRUE;
+    }
+    if (keyval == GDK_KEY_Left || keyval == GDK_KEY_Right) {
+        gint64 step = (state & GDK_CONTROL_MASK) ? 100 * GST_MSECOND
+                      : (state & GDK_SHIFT_MASK) ? GST_SECOND
+                                                 : 5 * GST_SECOND;
+        seek_relative(keyval == GDK_KEY_Left ? -step : step);
         return TRUE;
     }
     if (state & GDK_ALT_MASK) {

@@ -20,11 +20,16 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     double  amp = mid * 0.9;
 
     // Themed background comes from the "view" CSS class; content uses the
-    // accent colour so it follows the light/dark scheme.
+    // accent colour so it follows the light/dark scheme. The accent API needs
+    // libadwaita 1.6; older versions fall back to the theme foreground colour.
+    GdkRGBA acc;
+#if ADW_CHECK_VERSION(1, 6, 0)
     AdwStyleManager *sm = adw_style_manager_get_default();
-    GdkRGBA          acc;
     adw_accent_color_to_standalone_rgba(adw_style_manager_get_accent_color(sm),
                                         adw_style_manager_get_dark(sm), &acc);
+#else
+    gtk_widget_get_color(GTK_WIDGET(area), &acc);
+#endif
 
     // waveform: one vertical line per pixel column
     GArray *peaks = d->track->peaks;
@@ -84,6 +89,27 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
     cairo_line_to(cr, px, h);
     cairo_stroke(cr);
 
+    // time label following the playhead: min'sec''ms'''
+    if (d->track->duration > 0) {
+        gint64 pos = (gint64)(d->playhead * (double)d->track->duration) / GST_MSECOND;
+        char   tbuf[32];
+        g_snprintf(tbuf, sizeof tbuf, "%d'%02d''%03d'''", (int)(pos / 60000),
+                   (int)(pos / 1000 % 60), (int)(pos % 1000));
+
+        cairo_text_extents_t te;
+        cairo_text_extents(cr, tbuf, &te);
+        double pad = 4, bw = te.width + 2 * pad, bh = 11 + 2 * pad;
+        double bx = px + 3 + bw > w ? px - 3 - bw : px + 3;
+        double by = mid - bh / 2;
+
+        cairo_set_source_rgb(cr, 0.90, 0.30, 0.30);
+        cairo_rectangle(cr, bx, by, bw, bh);
+        cairo_fill(cr);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_move_to(cr, bx + pad - te.x_bearing, by + pad - te.y_bearing);
+        cairo_show_text(cr, tbuf);
+    }
+
     // active border
     if (d->active) {
         cairo_set_source_rgb(cr, acc.red, acc.green, acc.blue);
@@ -132,8 +158,10 @@ waveform_new(Track *t, WaveformClickFn on_click, gpointer user)
     AdwStyleManager *sm = adw_style_manager_get_default();
     g_signal_connect_object(sm, "notify::dark", G_CALLBACK(gtk_widget_queue_draw), area,
                             G_CONNECT_SWAPPED);
+#if ADW_CHECK_VERSION(1, 6, 0)
     g_signal_connect_object(sm, "notify::accent-color", G_CALLBACK(gtk_widget_queue_draw), area,
                             G_CONNECT_SWAPPED);
+#endif
 
     WfData *d   = g_new0(WfData, 1);
     d->track    = t;
