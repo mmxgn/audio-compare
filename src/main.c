@@ -395,6 +395,64 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
 }
 
 static void
+on_about(GSimpleAction *a, GVariant *p, gpointer user)
+{
+    AdwAboutDialog *d = ADW_ABOUT_DIALOG(adw_about_dialog_new());
+    adw_about_dialog_set_application_name(d, "Audio Compare");
+    adw_about_dialog_set_application_icon(d, "org.mmxgn.audiocompare");
+    adw_about_dialog_set_version(d, "0.1.0");
+    adw_about_dialog_set_developer_name(d, "mmxgn");
+    adw_about_dialog_set_website(d, "https://github.com/mmxgn/audio-compare");
+    adw_about_dialog_set_license_type(d, GTK_LICENSE_GPL_3_0);
+    adw_dialog_present(ADW_DIALOG(d), GTK_WIDGET(app.win));
+}
+
+static void
+add_shortcut(AdwPreferencesGroup *group, const char *action, const char *keys)
+{
+    GtkWidget *row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), action);
+    GtkWidget *lbl = gtk_label_new(keys);
+    gtk_widget_add_css_class(lbl, "dim-label");
+    adw_action_row_add_suffix(ADW_ACTION_ROW(row), lbl);
+    adw_preferences_group_add(group, row);
+}
+
+static void
+on_shortcuts(GSimpleAction *a, GVariant *p, gpointer user)
+{
+    AdwPreferencesDialog *d = ADW_PREFERENCES_DIALOG(adw_preferences_dialog_new());
+    adw_dialog_set_title(ADW_DIALOG(d), "Keyboard Shortcuts");
+    GtkWidget *page = adw_preferences_page_new();
+
+    AdwPreferencesGroup *play = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(play, "Playback");
+    add_shortcut(play, "Play / pause", "Space");
+    add_shortcut(play, "Seek back / forward 5 s", "← / →");
+    add_shortcut(play, "Seek 1 s", "Shift + ← / →");
+    add_shortcut(play, "Seek 100 ms", "Ctrl + ← / →");
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), play);
+
+    AdwPreferencesGroup *panes = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(panes, "Panes");
+    add_shortcut(panes, "Switch active file", "Alt + ↑ / ↓");
+    add_shortcut(panes, "Switch to a pane", "Click");
+    add_shortcut(panes, "Scrub", "Click + drag");
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), panes);
+
+    AdwPreferencesGroup *trk = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(trk, "Track (hovered or focused pane)");
+    add_shortcut(trk, "Assign to bus", "0 – 9");
+    add_shortcut(trk, "Invert polarity", "i  or  -");
+    add_shortcut(trk, "Mute", "m");
+    add_shortcut(trk, "Solo", "s");
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), trk);
+
+    adw_preferences_dialog_add(d, ADW_PREFERENCES_PAGE(page));
+    adw_dialog_present(ADW_DIALOG(d), GTK_WIDGET(app.win));
+}
+
+static void
 on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
 {
     GError     *err   = NULL;
@@ -464,8 +522,28 @@ activate(GtkApplication *gapp, gpointer user)
     gtk_widget_add_css_class(reset, "destructive-action"); // red, stands out
     g_signal_connect(reset, "clicked", G_CALLBACK(on_reset), NULL);
 
+    // Primary (hamburger) menu with Shortcuts and About.
+    GSimpleAction *act_sc = g_simple_action_new("shortcuts", NULL);
+    g_signal_connect(act_sc, "activate", G_CALLBACK(on_shortcuts), NULL);
+    g_action_map_add_action(G_ACTION_MAP(gapp), G_ACTION(act_sc));
+    g_object_unref(act_sc);
+
+    GSimpleAction *act_about = g_simple_action_new("about", NULL);
+    g_signal_connect(act_about, "activate", G_CALLBACK(on_about), NULL);
+    g_action_map_add_action(G_ACTION_MAP(gapp), G_ACTION(act_about));
+    g_object_unref(act_about);
+
+    GMenu *menu = g_menu_new();
+    g_menu_append(menu, "Keyboard Shortcuts", "app.shortcuts");
+    g_menu_append(menu, "About Audio Compare", "app.about");
+    GtkWidget *hamburger = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(hamburger), "open-menu-symbolic");
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(hamburger), G_MENU_MODEL(menu));
+    g_object_unref(menu);
+
     GtkWidget *header = adw_header_bar_new();
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), open);
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), hamburger);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), reset);
 
     app.list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
