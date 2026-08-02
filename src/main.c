@@ -47,11 +47,16 @@ apply_audible(void)
             any_solo = TRUE;
     }
 
+    // Read the clock once so every track's vol_cs is set to the same running-
+    // time sample. For identical content this makes the switch seamless; for
+    // different content the one-sample discontinuity is the inherent A/B trade-off.
+    GstClockTime when = (GstClockTime)player_running_time();
+
     for (guint i = 0; i < app.tracks->len; i++) {
         Track   *t    = g_ptr_array_index(app.tracks, i);
         gboolean aud  = is_audible((int)i);
         gboolean play = aud && !t->muted && (!any_solo || t->soloed);
-        player_set_audible(t, play);
+        player_set_audible(t, play, when);
         waveform_set_active(g_ptr_array_index(app.waves, i), aud);
         waveform_set_focused(g_ptr_array_index(app.waves, i), (int)i == app.active);
         waveform_set_dimmed(g_ptr_array_index(app.waves, i),

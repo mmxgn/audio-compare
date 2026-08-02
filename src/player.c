@@ -18,6 +18,18 @@ on_bus(GstBus *bus, GstMessage *msg, gpointer user)
     return TRUE;
 }
 
+// Pipeline running time in nanoseconds, or 0 if no clock is available yet.
+gint64
+player_running_time(void)
+{
+    GstClock *clock = gst_element_get_clock(pipeline);
+    if (!clock)
+        return 0;
+    GstClockTime t = gst_clock_get_time(clock) - gst_element_get_base_time(pipeline);
+    gst_object_unref(clock);
+    return (gint64)t;
+}
+
 void
 player_init(void)
 {
@@ -45,6 +57,7 @@ player_shutdown(void)
     gst_element_set_state(pipeline, GST_STATE_NULL);
     gst_object_unref(pipeline);
     pipeline = NULL;
+    mixer    = NULL;
 }
 
 // uridecodebin exposes its audio pad late; link it to the branch's converter.
@@ -69,18 +82,29 @@ player_add(Track *t)
     GstElement *vol      = gst_element_factory_make("volume", NULL);
 
     g_object_set(dec, "uri", t->uri, NULL);
-    g_object_set(vol, "volume", 0.0, NULL); // muted until made audible
 
-    // Drive polarity through a control source so toggling ramps per-sample
-    // (through zero) instead of stepping, which would click.
-    GstControlSource *cs = gst_interpolation_control_source_new();
-    g_object_set(cs, "mode", GST_INTERPOLATION_MODE_LINEAR, NULL);
-    gst_timed_value_control_source_set(GST_TIMED_VALUE_CONTROL_SOURCE(cs), 0,
+    // Drive both volume and polarity through control sources so every change
+    // lands on a specific pipeline running-time sample, with no buffer-boundary
+    // races from g_object_set.
+
+    // vol: starts muted (0.0); player_set_audible() moves it sample-accurately.
+    GstControlSource *vol_cs = gst_interpolation_control_source_new();
+    g_object_set(vol_cs, "mode", GST_INTERPOLATION_MODE_LINEAR, NULL);
+    gst_timed_value_control_source_set(GST_TIMED_VALUE_CONTROL_SOURCE(vol_cs), 0, 0.0);
+    gst_object_add_control_binding(GST_OBJECT(vol), gst_direct_control_binding_new_absolute(
+                                                        GST_OBJECT(vol), "volume", vol_cs));
+    t->vol_cs = vol_cs; // borrowed; the binding owns a ref
+    gst_object_unref(vol_cs);
+
+    // amp: polarity ramp, same pattern as before.
+    GstControlSource *amp_cs = gst_interpolation_control_source_new();
+    g_object_set(amp_cs, "mode", GST_INTERPOLATION_MODE_LINEAR, NULL);
+    gst_timed_value_control_source_set(GST_TIMED_VALUE_CONTROL_SOURCE(amp_cs), 0,
                                        t->inverted ? -1.0 : 1.0);
     gst_object_add_control_binding(GST_OBJECT(amp), gst_direct_control_binding_new_absolute(
-                                                        GST_OBJECT(amp), "amplification", cs));
-    t->amp_cs = cs; // borrowed; the binding owns a ref
-    gst_object_unref(cs);
+                                                        GST_OBJECT(amp), "amplification", amp_cs));
+    t->amp_cs = amp_cs; // borrowed; the binding owns a ref
+    gst_object_unref(amp_cs);
 
     gst_bin_add_many(GST_BIN(branch), dec, conv, resample, amp, vol, NULL);
     gst_element_link_many(conv, resample, amp, vol, NULL);
@@ -111,7 +135,7 @@ player_remove(Track *t)
         return;
 
     // Stop the pipeline so removal is race-free, then restore. Closing a track
-    // is rare, so the brief re-preroll gap is acceptable (see plan).
+    // is rare, so the brief re-preroll gap is acceptable.
     GstState state;
     gst_element_get_state(pipeline, &state, NULL, 0);
     gint64 pos = player_position();
@@ -129,7 +153,8 @@ player_remove(Track *t)
     t->branch = NULL;
     t->vol    = NULL;
     t->amp    = NULL;
-    t->amp_cs = NULL; // freed with its binding when the branch is disposed
+    t->vol_cs = NULL; // freed with its binding when the branch is disposed
+    t->amp_cs = NULL;
 
     if (state == GST_STATE_PLAYING || state == GST_STATE_PAUSED) {
         gst_element_set_state(pipeline, state);
@@ -138,11 +163,20 @@ player_remove(Track *t)
     }
 }
 
+// Switch a track's audibility at exactly `when` (pipeline running time).
+// Caller should pass the same `when` for all tracks in one apply_audible()
+// sweep so they all flip on the same audio sample.
 void
-player_set_audible(Track *t, gboolean audible)
+player_set_audible(Track *t, gboolean audible, GstClockTime when)
 {
-    if (t->vol)
-        g_object_set(t->vol, "volume", audible ? 1.0 : 0.0, NULL);
+    if (!t->vol_cs)
+        return;
+    GstTimedValueControlSource *tv = GST_TIMED_VALUE_CONTROL_SOURCE(t->vol_cs);
+    // Set a constant from `when` onwards. Adding the new point before removing
+    // stale ones ensures the control source is never empty (no undefined read).
+    gst_timed_value_control_source_set(tv, when, audible ? 1.0 : 0.0);
+    // Remove any earlier points that are now superseded.
+    gst_timed_value_control_source_unset(tv, 0);
 }
 
 void
@@ -153,12 +187,7 @@ player_set_inverted(Track *t, gboolean inverted)
     GstTimedValueControlSource *tv = GST_TIMED_VALUE_CONTROL_SOURCE(t->amp_cs);
     double                      to = inverted ? -1.0 : 1.0;
 
-    GstClockTime now   = 0;
-    GstClock    *clock = gst_element_get_clock(pipeline);
-    if (clock) {
-        now = gst_clock_get_time(clock) - gst_element_get_base_time(pipeline);
-        gst_object_unref(clock);
-    }
+    GstClockTime now = (GstClockTime)player_running_time();
     // Ramp from the old polarity to the new one; the element interpolates
     // per-sample through zero, so there is no click.
     gst_timed_value_control_source_unset_all(tv);

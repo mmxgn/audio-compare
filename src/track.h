@@ -20,8 +20,9 @@ typedef struct {
 
     // Player branch handles (owned by the player, see player.c).
     GstElement       *branch; // bin: uridecodebin->convert->resample->amplify->volume
-    GstElement       *vol;    // volume element inside the branch, toggled to mute
+    GstElement       *vol;    // volume element inside the branch
     GstElement       *amp;    // audioamplify, +1 normal / -1 inverted
+    GstControlSource *vol_cs; // drives vol, switched sample-accurately on track change
     GstControlSource *amp_cs; // drives amp polarity, ramped to declick
     GstPad           *mixpad; // requested audiomixer sink pad
 } Track;
