@@ -28,5 +28,5 @@ void player_set_inverted(Track *t, gboolean inverted); // polarity x-1
 void   player_play(void);
 void   player_pause(void);
 void   player_seek(gint64 pos);
-gint64 player_position(void); // ns, -1 if unknown
+gint64 player_position(void);     // ns, -1 if unknown
 gint64 player_running_time(void); // ns running time for passing to player_set_audible

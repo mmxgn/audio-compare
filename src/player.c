@@ -91,8 +91,8 @@ player_add(Track *t)
     GstControlSource *vol_cs = gst_interpolation_control_source_new();
     g_object_set(vol_cs, "mode", GST_INTERPOLATION_MODE_LINEAR, NULL);
     gst_timed_value_control_source_set(GST_TIMED_VALUE_CONTROL_SOURCE(vol_cs), 0, 0.0);
-    gst_object_add_control_binding(GST_OBJECT(vol),
-        gst_direct_control_binding_new_absolute(GST_OBJECT(vol), "volume", vol_cs));
+    gst_object_add_control_binding(GST_OBJECT(vol), gst_direct_control_binding_new_absolute(
+                                                        GST_OBJECT(vol), "volume", vol_cs));
     t->vol_cs = vol_cs; // borrowed; the binding owns a ref
     gst_object_unref(vol_cs);
 
@@ -101,8 +101,8 @@ player_add(Track *t)
     g_object_set(amp_cs, "mode", GST_INTERPOLATION_MODE_LINEAR, NULL);
     gst_timed_value_control_source_set(GST_TIMED_VALUE_CONTROL_SOURCE(amp_cs), 0,
                                        t->inverted ? -1.0 : 1.0);
-    gst_object_add_control_binding(GST_OBJECT(amp),
-        gst_direct_control_binding_new_absolute(GST_OBJECT(amp), "amplification", amp_cs));
+    gst_object_add_control_binding(GST_OBJECT(amp), gst_direct_control_binding_new_absolute(
+                                                        GST_OBJECT(amp), "amplification", amp_cs));
     t->amp_cs = amp_cs; // borrowed; the binding owns a ref
     gst_object_unref(amp_cs);
 
@@ -185,7 +185,7 @@ player_set_inverted(Track *t, gboolean inverted)
     if (!t->amp_cs)
         return;
     GstTimedValueControlSource *tv = GST_TIMED_VALUE_CONTROL_SOURCE(t->amp_cs);
-    double to = inverted ? -1.0 : 1.0;
+    double                      to = inverted ? -1.0 : 1.0;
 
     GstClockTime now = (GstClockTime)player_running_time();
     // Ramp from the old polarity to the new one; the element interpolates
