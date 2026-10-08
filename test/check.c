@@ -63,8 +63,22 @@ void
 player_set_inverted(Track *t, gboolean inverted)
 {
 }
-void
+gboolean
 player_play(void)
+{
+    return TRUE;
+}
+void
+player_set_error_handler(PlayerErrorFn fn)
+{
+}
+GstClockTime
+player_switch_time(void)
+{
+    return 0;
+}
+void
+player_wait_ready(void)
 {
 }
 void
