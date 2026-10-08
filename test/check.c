@@ -189,11 +189,41 @@ test_no_seek_without_duration(void)
     app.active         = 0;
     tracks[0].duration = -1; // header-only file: zero frames, no duration
     on_wave_click(g_ptr_array_index(app.waves, 0), 1.0, NULL);
+    tick(NULL);
     assert(seeks == 0 && "no seek at all when the duration is unknown");
 
     tracks[0].duration = 4 * GST_SECOND;
     on_wave_click(g_ptr_array_index(app.waves, 0), 1.0, NULL);
+    tick(NULL); // seeks are coalesced onto the tick, see test_scrub_seeks_coalesce
     assert(seeks == 1 && last_seek == 4 * GST_SECOND && "a known duration still seeks");
+}
+
+// A drag emits one motion event per frame; each used to seek inline, and every
+// flushing seek repositions every branch. Only the last target per frame matters.
+static void
+test_scrub_seeks_coalesce(void)
+{
+    reset(1);
+    app.active         = 0;
+    tracks[0].duration = 10 * GST_SECOND;
+    GtkWidget *wf      = g_ptr_array_index(app.waves, 0);
+
+    on_wave_scrub(wf, TRUE, NULL);
+    for (int i = 1; i <= 50; i++) // a 50-event drag inside one frame
+        on_wave_click(wf, i / 100.0, NULL);
+    assert(seeks == 0 && "a drag must not seek inline");
+
+    tick(NULL);
+    assert(seeks == 1 && "one seek per frame, however many motion events");
+    assert(last_seek == 5 * GST_SECOND && "the surviving seek is the newest target");
+
+    for (int i = 0; i < 10; i++) // nothing new: no further seeks
+        tick(NULL);
+    assert(seeks == 1 && "an idle tick must not re-seek");
+
+    on_wave_click(wf, 0.8, NULL); // drag-end must land before playback resumes
+    on_wave_scrub(wf, FALSE, NULL);
+    assert(seeks == 2 && last_seek == 8 * GST_SECOND && "drag-end flushes the last target");
 }
 
 // Bug 8: the 33 ms tick must not redraw a pane whose playhead did not move.
@@ -236,6 +266,8 @@ main(int argc, char **argv)
         test_no_seek_without_duration();
     if (!only || g_str_equal(only, "8"))
         test_playhead_redraw_is_guarded();
-    g_print("checks passed: %s\n", only ? only : "1 6 7 8");
+    if (!only || g_str_equal(only, "9"))
+        test_scrub_seeks_coalesce();
+    g_print("checks passed: %s\n", only ? only : "1 6 7 8 9");
     return 0;
 }

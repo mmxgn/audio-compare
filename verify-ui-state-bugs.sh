@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build and run the automated checks for the UI/state fixes (bugs 1, 6, 7, 8).
+# Build and run the automated checks for the UI/state fixes (bugs 1, 6, 7, 8)
+# plus the scrub seek coalescing (9).
 # The remaining fixes (2, 3, 4, 5) are GUI behaviour -- see the manual steps in
 # the branch report.
 set -eu
@@ -9,8 +10,8 @@ run() { if [ -n "${IN_NIX_SHELL:-}" ]; then "$@"; else nix develop -c "$@"; fi; 
 
 [ -d build ] || run meson setup build
 run ninja -C build
-for bug in 1 6 7 8; do
-    printf 'bug %s: ' "$bug"
+for bug in 1 6 7 8 9; do
+    printf 'check %s: ' "$bug"
     run ./build/check "$bug"
 done
 

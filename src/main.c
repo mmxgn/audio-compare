@@ -193,6 +193,24 @@ seek_relative(gint64 delta)
     player_seek(pos);
 }
 
+// A drag emits a motion event per frame and every one of them seeked inline.
+// Each flushing seek repositions every branch, so the cost scales with track
+// count -- measured 0.20 ms at one track, 1.04 ms at eight mp3s. Stash the
+// target instead and let the tick apply at most one seek per frame.
+// ponytail: scrub only. Arrow-key repeat still seeks inline, because
+// seek_relative() derives its delta from player_position() and would compound
+// wrongly against a target that has not been applied yet.
+static gint64 seek_want = -1;
+
+static void
+flush_seek(void)
+{
+    if (seek_want >= 0) {
+        player_seek(seek_want);
+        seek_want = -1;
+    }
+}
+
 static void
 on_wave_click(GtkWidget *wf, double frac, gpointer user)
 {
@@ -207,7 +225,7 @@ on_wave_click(GtkWidget *wf, double frac, gpointer user)
     }
     Track *t = g_ptr_array_index(app.tracks, i);
     if (t->duration > 0)
-        player_seek((gint64)(frac * t->duration)); // scrub within the active pane
+        seek_want = (gint64)(frac * t->duration); // scrub within the active pane
 }
 
 static void
@@ -293,6 +311,8 @@ static void
 on_wave_scrub(GtkWidget *wf, gboolean active, gpointer user)
 {
     app.scrubbing = active;
+    if (!active)
+        flush_seek(); // land on the final drag position before resuming
     if (app.playing)
         active ? player_pause() : player_play();
 }
@@ -359,6 +379,7 @@ add_track(const char *uri)
 static gboolean
 tick(gpointer user)
 {
+    flush_seek();
     if (app.active >= 0) {
         gint64 pos = player_position();
         if (pos >= 0) {
