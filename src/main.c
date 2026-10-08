@@ -123,6 +123,7 @@ reset_engine(void)
         player_add(g_ptr_array_index(app.tracks, i));
 
     apply_audible();
+    player_wait_ready();
     if (pos > 0)
         player_seek(pos);
     if (app.playing)

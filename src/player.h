@@ -15,6 +15,9 @@
 void player_init(void);
 void player_shutdown(void);
 
+// Wait for the pipeline to finish prerolling; seeks before that are lost.
+void player_wait_ready(void);
+
 void player_add(Track *t);    // build and attach the track's audio branch
 void player_remove(Track *t); // detach and tear down the track's branch
 

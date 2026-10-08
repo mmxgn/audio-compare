@@ -7,6 +7,9 @@
 // Master headroom, applied once to the whole mix: -12 dB, i.e. room for four
 // tracks summing coherently at full scale before the sink has to clip.
 #define MIX_HEADROOM 0.25
+// Upper bound on how long we wait for branches to re-preroll. Bounded, not
+// GST_CLOCK_TIME_NONE: a branch that never prerolls would hang the UI forever.
+#define PREROLL_WAIT (5 * GST_SECOND)
 
 static GstElement *pipeline;
 static GstElement *mixer;
@@ -59,6 +62,16 @@ player_init(void)
     gst_object_unref(bus);
 
     gst_element_set_state(pipeline, GST_STATE_PAUSED);
+}
+
+// Block until every branch has finished prerolling. uridecodebin exposes its
+// pad late, so until then the branch is unlinked: a flushing seek aborts on the
+// unlinked pad, flush-stop never reaches the branch pads and they stay flushing
+// forever -- all audio stops. Call this after any state restore, before seeking.
+void
+player_wait_ready(void)
+{
+    gst_element_get_state(pipeline, NULL, NULL, PREROLL_WAIT);
 }
 
 void
@@ -150,8 +163,10 @@ player_remove(Track *t)
 
     // Stop the pipeline so removal is race-free, then restore. Closing a track
     // is rare, so the brief re-preroll gap is acceptable.
+    // Not a zero timeout: mid-preroll the query returns ASYNC with a stale
+    // state (READY), and we would then leave the pipeline stopped.
     GstState state;
-    gst_element_get_state(pipeline, &state, NULL, 0);
+    gst_element_get_state(pipeline, &state, NULL, PREROLL_WAIT);
     gint64 pos = player_position();
 
     gst_element_set_state(pipeline, GST_STATE_NULL);
@@ -172,6 +187,7 @@ player_remove(Track *t)
 
     if (state == GST_STATE_PLAYING || state == GST_STATE_PAUSED) {
         gst_element_set_state(pipeline, state);
+        player_wait_ready();
         if (pos > 0)
             player_seek(pos);
     }
