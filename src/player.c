@@ -14,7 +14,7 @@ static gboolean
 on_bus(GstBus *bus, GstMessage *msg, gpointer user)
 {
     if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS)
-        gst_element_seek_simple(pipeline, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH, 0);
+        player_seek(0);
     return TRUE;
 }
 
@@ -210,7 +210,10 @@ player_pause(void)
 void
 player_seek(gint64 pos)
 {
-    gst_element_seek_simple(pipeline, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT,
+    // ACCURATE, not KEY_UNIT: KEY_UNIT lets qtdemux and oggdemux snap to the
+    // nearest sync point, so two tracks land on different samples and the null
+    // test collapses. Sample-exact positioning is the whole premise here.
+    gst_element_seek_simple(pipeline, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE,
                             pos);
 }
 
