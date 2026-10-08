@@ -11,6 +11,13 @@
 // GST_CLOCK_TIME_NONE: a branch that never prerolls would hang the UI forever.
 #define PREROLL_WAIT (5 * GST_SECOND)
 
+// Polarity magnitude. Deliberately not 1.0: audioamplify latches itself into
+// GstBaseTransform passthrough whenever amplification is exactly 1.0, and
+// passthrough skips transform_ip, the only place it syncs its control source.
+// One buffer at unity and the element is deaf to every later change, so `i`
+// stops inverting. A hair under unity is -0.0000087 dB, which is nothing.
+#define POLARITY 0.999999
+
 static GstElement   *pipeline;
 static GstElement   *mixer;
 static guint         bus_watch;
@@ -194,7 +201,7 @@ player_add(Track *t)
     GstControlSource *amp_cs = gst_interpolation_control_source_new();
     g_object_set(amp_cs, "mode", GST_INTERPOLATION_MODE_LINEAR, NULL);
     gst_timed_value_control_source_set(GST_TIMED_VALUE_CONTROL_SOURCE(amp_cs), 0,
-                                       t->inverted ? -1.0 : 1.0);
+                                       t->inverted ? -POLARITY : POLARITY);
     gst_object_add_control_binding(GST_OBJECT(amp), gst_direct_control_binding_new_absolute(
                                                         GST_OBJECT(amp), "amplification", amp_cs));
     t->amp_cs = amp_cs; // borrowed; the binding owns a ref
@@ -282,13 +289,22 @@ player_set_inverted(Track *t, gboolean inverted)
     if (!t->amp_cs)
         return;
     GstTimedValueControlSource *tv = GST_TIMED_VALUE_CONTROL_SOURCE(t->amp_cs);
-    double                      to = inverted ? -1.0 : 1.0;
+    double                      to = inverted ? -POLARITY : POLARITY;
 
     GstClockTime now = (GstClockTime)player_running_time();
-    // Ramp from the old polarity to the new one; the element interpolates
-    // per-sample through zero, so there is no click.
+    // Ramp from wherever the polarity actually is, not from the opposite of the
+    // target: pressing `i` twice inside the ramp window would otherwise splice
+    // in a value the signal never held and jump further than full scale.
+    double from = inverted ? POLARITY : -POLARITY;
+    gst_control_source_get_value(t->amp_cs, now, &from);
+    // ponytail: the ramp only softens the click, it does not remove it.
+    // audioamplify syncs its control source once per buffer, so this is a
+    // staircase of one step per buffer - and a single hard step for decoders
+    // whose buffers are longer than INVERT_RAMP (flac's are ~85 ms). A real
+    // per-sample ramp needs an element that uses the control binding's
+    // get_value_array path, as `volume` does and audiofx elements do not.
     gst_timed_value_control_source_unset_all(tv);
-    gst_timed_value_control_source_set(tv, now, -to);
+    gst_timed_value_control_source_set(tv, now, from);
     gst_timed_value_control_source_set(tv, now + INVERT_RAMP, to);
 }
 
