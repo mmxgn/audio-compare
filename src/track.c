@@ -28,6 +28,18 @@ extract_peaks(Track *t)
     GstAppSink *sink = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(pipe), "sink"));
     gst_element_set_state(pipe, GST_STATE_PLAYING);
 
+    // Bounded wait: pull_sample() below blocks forever if the appsink never
+    // prerolls, so reject anything that does not reach PLAYING. A broken or
+    // missing file fails the state change; one with no audio stream (video,
+    // image, directory) leaves it ASYNC because nothing ever links to the sink.
+    if (gst_element_get_state(pipe, NULL, NULL, 5 * GST_SECOND) != GST_STATE_CHANGE_SUCCESS) {
+        g_warning("peaks: cannot decode %s", t->uri);
+        gst_object_unref(sink);
+        gst_element_set_state(pipe, GST_STATE_NULL);
+        gst_object_unref(pipe);
+        return;
+    }
+
     // R128 is defined per channel, and the channel count only arrives on the caps
     // of the first sample, so the state is created lazily in the loop.
     ebur128_state *r128     = NULL;
@@ -98,6 +110,18 @@ extract_peaks(Track *t)
         Peak p = { cmin, cmax };
         g_array_append_val(t->peaks, p);
     }
+
+    // pull_sample() returns NULL on a mid-file decode abort too, not just EOS;
+    // the bus tells them apart. ponytail: only catches aborts that actually post
+    // an error -- a plainly truncated file looks like clean EOS to GStreamer. We
+    // keep the partial peaks (and the short duration derived from them) and warn.
+    GstBus     *bus = gst_element_get_bus(pipe);
+    GstMessage *msg = gst_bus_pop_filtered(bus, GST_MESSAGE_ERROR);
+    if (msg) {
+        g_warning("peaks: decode of %s stopped early, waveform is incomplete", t->uri);
+        gst_message_unref(msg);
+    }
+    gst_object_unref(bus);
 
     if (r128) {
         ebur128_loudness_global(r128, &t->lufs);
