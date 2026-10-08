@@ -11,16 +11,82 @@
 // GST_CLOCK_TIME_NONE: a branch that never prerolls would hang the UI forever.
 #define PREROLL_WAIT (5 * GST_SECOND)
 
-static GstElement *pipeline;
-static GstElement *mixer;
-static guint       bus_watch;
+static GstElement   *pipeline;
+static GstElement   *mixer;
+static guint         bus_watch;
+static PlayerErrorFn on_error;
 
-// Loop the whole mix from the start when it ends.
+void
+player_set_error_handler(PlayerErrorFn fn)
+{
+    on_error = fn;
+}
+
+// Walk up from a message source to the pipeline's direct child holding it: a
+// track branch, or one of mixer/convert/sink. Borrowed -- the pipeline owns
+// every ancestor, and we only run on the main thread from the bus watch.
+static GstElement *
+child_of_pipeline(GstObject *obj)
+{
+    while (obj && GST_OBJECT_PARENT(obj) != GST_OBJECT(pipeline))
+        obj = GST_OBJECT_PARENT(obj);
+    return (GstElement *)obj;
+}
+
+// Cut a failed branch loose so the rest of the mix survives it. Leaving it
+// attached wedges everything: audiomixer is a GstAggregator and outputs nothing
+// until every sink pad has a buffer or EOS, a branch stuck in READY drags the
+// whole pipeline back there, its unanswered ASYNC_START leaves the pipeline
+// waiting forever, and it never answers the FLUSH_STOP of a seek. So drop it
+// outright, then re-assert the state the pipeline was headed for.
+//
+// The caller reports the branch first, so the handler has already cleared the
+// Track handles -- including its ref on the mixer pad, released below.
+static void
+release_branch(GstElement *branch)
+{
+    GstPad *src = gst_element_get_static_pad(branch, "src");
+    if (!src)
+        return; // not a track branch -- the audio sink has no src pad
+    GstPad    *mixpad = gst_pad_get_peer(src);
+    GstObject *owner  = mixpad ? gst_pad_get_parent(mixpad) : NULL;
+    if (owner == GST_OBJECT(mixer)) {
+        gst_element_set_locked_state(branch, TRUE);
+        gst_element_set_state(branch, GST_STATE_NULL);
+        gst_pad_unlink(src, mixpad);
+        gst_element_release_request_pad(mixer, mixpad);
+        gst_object_unref(mixpad); // the Track's ref
+        gst_bin_remove(GST_BIN(pipeline), branch);
+        gst_element_set_state(pipeline, GST_STATE_TARGET(pipeline));
+    }
+    if (owner)
+        gst_object_unref(owner);
+    if (mixpad)
+        gst_object_unref(mixpad);
+    gst_object_unref(src);
+}
+
+// Loop the whole mix from the start when it ends; report errors.
 static gboolean
 on_bus(GstBus *bus, GstMessage *msg, gpointer user)
 {
     if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS)
-        player_seek(0);
+        player_seek(0); // one seek path, so the loop is ACCURATE too
+    if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
+        // A dying branch posts several messages. Only the first is actionable:
+        // by the time the rest arrive, their source has no path back to the
+        // pipeline, or sits in a branch already locked off. Report one.
+        GstElement *branch = child_of_pipeline(GST_MESSAGE_SRC(msg));
+        if (!branch || gst_element_is_locked_state(branch))
+            return TRUE;
+        GError *err = NULL;
+        gst_message_parse_error(msg, &err, NULL);
+        g_warning("player: %s: %s", GST_OBJECT_NAME(msg->src), err->message);
+        if (on_error)
+            on_error(branch, err->message); // while the branch is still alive
+        release_branch(branch);
+        g_clear_error(&err);
+    }
     return TRUE;
 }
 
@@ -61,7 +127,8 @@ player_init(void)
     bus_watch   = gst_bus_add_watch(bus, on_bus, NULL);
     gst_object_unref(bus);
 
-    gst_element_set_state(pipeline, GST_STATE_PAUSED);
+    if (gst_element_set_state(pipeline, GST_STATE_PAUSED) == GST_STATE_CHANGE_FAILURE)
+        g_warning("player: pipeline failed to reach PAUSED");
 }
 
 // Block until every branch has finished prerolling. uridecodebin exposes its
@@ -225,10 +292,12 @@ player_set_inverted(Track *t, gboolean inverted)
     gst_timed_value_control_source_set(tv, now + INVERT_RAMP, to);
 }
 
-void
+// FALSE if the pipeline refused to start (e.g. the audio device is busy), so
+// the UI does not claim to be playing when nothing is.
+gboolean
 player_play(void)
 {
-    gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    return gst_element_set_state(pipeline, GST_STATE_PLAYING) != GST_STATE_CHANGE_FAILURE;
 }
 
 void

@@ -17,6 +17,7 @@ typedef struct {
     gboolean inverted; // polarity flipped (x-1)
     gboolean muted;    // silenced regardless of the audible set
     gboolean soloed;   // when any track in the bus is soloed, only solos play
+    gboolean failed;   // its branch errored: not re-added on engine reset
 
     // Player branch handles (owned by the player, see player.c).
     GstElement       *branch; // bin: uridecodebin->convert->resample->amplify->volume

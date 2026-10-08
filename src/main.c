@@ -9,6 +9,7 @@ typedef struct {
     GtkWindow *win;
     GtkWidget *list;         // vertical GtkBox of waveform panes
     GtkWidget *placeholder;  // shown while empty
+    GtkWidget *toasts;       // AdwToastOverlay wrapping the pane list
     GtkWidget *hovered_wave; // pane under the pointer, for bus assignment
     gboolean   kbd_focus;    // last nav was keyboard: target the active track
     GPtrArray *tracks;       // Track*
@@ -94,18 +95,54 @@ set_active(int b)
 }
 
 static void
+toast(const char *text)
+{
+    if (app.toasts)
+        adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(app.toasts), adw_toast_new(text));
+    else
+        g_warning("%s", text);
+}
+
+// A branch that errored is torn down by player.c as soon as we return, so drop
+// our handles to it, remember not to re-add it on a reset, and name the file.
+static void
+on_player_error(GstElement *branch, const char *msg)
+{
+    for (guint i = 0; i < app.tracks->len; i++) {
+        Track *t = g_ptr_array_index(app.tracks, i);
+        if (t->branch != branch)
+            continue;
+        t->failed = TRUE;
+        t->branch = t->vol = t->amp = NULL;
+        t->vol_cs = t->amp_cs = NULL;
+        t->mixpad             = NULL;
+        char *s               = g_strdup_printf("%s stopped playing: %s", t->name, msg);
+        toast(s);
+        g_free(s);
+        return;
+    }
+    toast(msg); // not a track branch: the mixer or the audio device
+}
+
+static void
 toggle_play(void)
 {
     if (app.active < 0)
         return;
-    app.playing = !app.playing;
-    // Mid-scrub the pipeline is held paused on purpose; drag-end applies this.
-    if (app.scrubbing)
+    // Mid-scrub the pipeline is held paused on purpose; flip the intent only and
+    // let drag-end apply it.
+    if (app.scrubbing) {
+        app.playing = !app.playing;
         return;
-    if (app.playing)
-        player_play();
-    else
+    }
+    if (app.playing) {
         player_pause();
+        app.playing = FALSE;
+    } else if (player_play()) {
+        app.playing = TRUE;
+    } else {
+        toast("Could not start playback. Try Reset audio engine.");
+    }
 }
 
 // Rebuild the audio pipeline from scratch and re-attach every track, keeping
@@ -119,8 +156,11 @@ reset_engine(void)
 
     player_shutdown();
     player_init();
-    for (guint i = 0; i < app.tracks->len; i++)
-        player_add(g_ptr_array_index(app.tracks, i));
+    for (guint i = 0; i < app.tracks->len; i++) {
+        Track *t = g_ptr_array_index(app.tracks, i);
+        if (!t->failed) // re-adding a dead branch would wedge the mixer again
+            player_add(t);
+    }
 
     apply_audible();
     player_wait_ready();
@@ -528,6 +568,7 @@ activate(GtkApplication *gapp, gpointer user)
     app.waves  = g_ptr_array_new();
     app.rows   = g_ptr_array_new();
     app.active = -1;
+    player_set_error_handler(on_player_error); // needs app.tracks
 
     GtkWidget *win = adw_application_window_new(gapp);
     app.win        = GTK_WINDOW(win);
@@ -581,9 +622,12 @@ activate(GtkApplication *gapp, gpointer user)
                                    GTK_POLICY_AUTOMATIC);
     gtk_widget_set_vexpand(scroll, TRUE);
 
+    app.toasts = adw_toast_overlay_new();
+    adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(app.toasts), scroll);
+
     GtkWidget *toolbar = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scroll);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), app.toasts);
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(win), toolbar);
 
     GtkEventController *keys = gtk_event_controller_key_new();
