@@ -9,13 +9,15 @@ typedef struct {
     GtkWindow *win;
     GtkWidget *list;         // vertical GtkBox of waveform panes
     GtkWidget *placeholder;  // shown while empty
+    GtkWidget *toasts;       // AdwToastOverlay wrapping the pane list
     GtkWidget *hovered_wave; // pane under the pointer, for bus assignment
     gboolean   kbd_focus;    // last nav was keyboard: target the active track
     GPtrArray *tracks;       // Track*
     GPtrArray *waves;        // GtkWidget* drawing area, parallel to tracks
     GPtrArray *rows;         // GtkWidget* pane container, parallel to tracks
     int        active;       // focused track, -1 if none
-    gboolean   playing;
+    gboolean   playing;      // intended play state; the pipeline follows it
+    gboolean   scrubbing;    // a scrub drag holds the pipeline paused
     guint      tick_id;
 } App;
 
@@ -39,18 +41,19 @@ static void
 apply_audible(void)
 {
     // Solo is scoped to the audible set: if any of its tracks is soloed, only
-    // the soloed ones play.
+    // the soloed ones play. A muted track doesn't count -- it can't satisfy its
+    // own solo, so counting it would silence the whole bus.
     gboolean any_solo = FALSE;
     for (guint i = 0; i < app.tracks->len; i++) {
         Track *t = g_ptr_array_index(app.tracks, i);
-        if (is_audible((int)i) && t->soloed)
+        if (is_audible((int)i) && t->soloed && !t->muted)
             any_solo = TRUE;
     }
 
-    // Read the clock once so every track's vol_cs is set to the same running-
-    // time sample. For identical content this makes the switch seamless; for
-    // different content the one-sample discontinuity is the inherent A/B trade-off.
-    GstClockTime when = (GstClockTime)player_running_time();
+    // One switch point for the whole sweep, so every track crosses on the same
+    // sample. It sits ahead of the audio already in flight, so the change is
+    // heard SWITCH_LEAD from now; see player_switch_time().
+    GstClockTime when = player_switch_time();
 
     for (guint i = 0; i < app.tracks->len; i++) {
         Track   *t    = g_ptr_array_index(app.tracks, i);
@@ -92,15 +95,54 @@ set_active(int b)
 }
 
 static void
+toast(const char *text)
+{
+    if (app.toasts)
+        adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(app.toasts), adw_toast_new(text));
+    else
+        g_warning("%s", text);
+}
+
+// A branch that errored is torn down by player.c as soon as we return, so drop
+// our handles to it, remember not to re-add it on a reset, and name the file.
+static void
+on_player_error(GstElement *branch, const char *msg)
+{
+    for (guint i = 0; i < app.tracks->len; i++) {
+        Track *t = g_ptr_array_index(app.tracks, i);
+        if (t->branch != branch)
+            continue;
+        t->failed = TRUE;
+        t->branch = t->vol = t->amp = NULL;
+        t->vol_cs = t->amp_cs = NULL;
+        t->mixpad             = NULL;
+        char *s               = g_strdup_printf("%s stopped playing: %s", t->name, msg);
+        toast(s);
+        g_free(s);
+        return;
+    }
+    toast(msg); // not a track branch: the mixer or the audio device
+}
+
+static void
 toggle_play(void)
 {
     if (app.active < 0)
         return;
-    app.playing = !app.playing;
-    if (app.playing)
-        player_play();
-    else
+    // Mid-scrub the pipeline is held paused on purpose; flip the intent only and
+    // let drag-end apply it.
+    if (app.scrubbing) {
+        app.playing = !app.playing;
+        return;
+    }
+    if (app.playing) {
         player_pause();
+        app.playing = FALSE;
+    } else if (player_play()) {
+        app.playing = TRUE;
+    } else {
+        toast("Could not start playback. Try Reset audio engine.");
+    }
 }
 
 // Rebuild the audio pipeline from scratch and re-attach every track, keeping
@@ -114,10 +156,14 @@ reset_engine(void)
 
     player_shutdown();
     player_init();
-    for (guint i = 0; i < app.tracks->len; i++)
-        player_add(g_ptr_array_index(app.tracks, i));
+    for (guint i = 0; i < app.tracks->len; i++) {
+        Track *t = g_ptr_array_index(app.tracks, i);
+        if (!t->failed) // re-adding a dead branch would wedge the mixer again
+            player_add(t);
+    }
 
     apply_audible();
+    player_wait_ready();
     if (pos > 0)
         player_seek(pos);
     if (app.playing)
@@ -147,6 +193,24 @@ seek_relative(gint64 delta)
     player_seek(pos);
 }
 
+// A drag emits a motion event per frame and every one of them seeked inline.
+// Each flushing seek repositions every branch, so the cost scales with track
+// count -- measured 0.20 ms at one track, 1.04 ms at eight mp3s. Stash the
+// target instead and let the tick apply at most one seek per frame.
+// ponytail: scrub only. Arrow-key repeat still seeks inline, because
+// seek_relative() derives its delta from player_position() and would compound
+// wrongly against a target that has not been applied yet.
+static gint64 seek_want = -1;
+
+static void
+flush_seek(void)
+{
+    if (seek_want >= 0) {
+        player_seek(seek_want);
+        seek_want = -1;
+    }
+}
+
 static void
 on_wave_click(GtkWidget *wf, double frac, gpointer user)
 {
@@ -160,7 +224,8 @@ on_wave_click(GtkWidget *wf, double frac, gpointer user)
         return;
     }
     Track *t = g_ptr_array_index(app.tracks, i);
-    player_seek((gint64)(frac * t->duration)); // scrub within the active pane
+    if (t->duration > 0)
+        seek_want = (gint64)(frac * t->duration); // scrub within the active pane
 }
 
 static void
@@ -195,6 +260,9 @@ remove_track(GtkWidget *row)
     if (app.tracks->len == 0) {
         app.active  = -1;
         app.playing = FALSE;
+        // player_remove() restored the state it captured before the removal, so
+        // the pipeline is still heading for PLAYING; park it to match the UI.
+        player_pause();
         show_placeholder();
     } else if (was_active) {
         app.active = MIN((int)i, (int)app.tracks->len - 1);
@@ -238,18 +306,15 @@ fit_window(void)
 }
 
 // Pause the pipeline during a scrub drag so the flushing seeks hit a stopped
-// sink (silent, no clicks); resume afterwards if it was playing.
-static gboolean scrub_was_playing;
+// sink (silent, no clicks); resume afterwards if app.playing still says so.
 static void
 on_wave_scrub(GtkWidget *wf, gboolean active, gpointer user)
 {
-    if (active) {
-        scrub_was_playing = app.playing;
-        if (app.playing)
-            player_pause();
-    } else if (scrub_was_playing) {
-        player_play();
-    }
+    app.scrubbing = active;
+    if (!active)
+        flush_seek(); // land on the final drag position before resuming
+    if (app.playing)
+        active ? player_pause() : player_play();
 }
 
 // Moving the mouse over a pane (enter or motion) switches to hover mode.
@@ -314,13 +379,16 @@ add_track(const char *uri)
 static gboolean
 tick(gpointer user)
 {
+    flush_seek();
     if (app.active >= 0) {
         gint64 pos = player_position();
         if (pos >= 0) {
             for (guint i = 0; i < app.waves->len; i++) {
                 Track *ti   = g_ptr_array_index(app.tracks, i);
                 double frac = ti->duration > 0 ? (double)pos / ti->duration : 0;
-                waveform_set_playhead(g_ptr_array_index(app.waves, i), frac);
+                // Shorter tracks run out before the shared position does; park
+                // the playhead at the end instead of drawing it off-widget.
+                waveform_set_playhead(g_ptr_array_index(app.waves, i), CLAMP(frac, 0.0, 1.0));
             }
         }
     }
@@ -330,12 +398,20 @@ tick(gpointer user)
 static gboolean
 on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state, gpointer user)
 {
-    if (keyval == GDK_KEY_space) {
+    // An AdwDialog lives inside the window, so this capture-phase controller
+    // would otherwise eat its keys. Let the presented dialog have them.
+    if (adw_application_window_get_visible_dialog(ADW_APPLICATION_WINDOW(app.win)))
+        return FALSE;
+
+    // Unmodified keys only: Ctrl/Alt/Super combos belong to the app or the WM.
+    gboolean plain = !(state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK));
+
+    if (plain && keyval == GDK_KEY_space) {
         toggle_play();
         return TRUE;
     }
     // Digit over a pane: toggle that track's bus membership.
-    if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9) {
+    if (plain && keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9) {
         guint i;
         if (target_track(&i)) {
             Track *t = g_ptr_array_index(app.tracks, i);
@@ -347,7 +423,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
         }
     }
     // '-' or 'i' over a pane: invert that track's polarity.
-    if (keyval == GDK_KEY_minus || keyval == GDK_KEY_i) {
+    if (plain && (keyval == GDK_KEY_minus || keyval == GDK_KEY_i)) {
         guint i;
         if (target_track(&i)) {
             Track *t    = g_ptr_array_index(app.tracks, i);
@@ -358,7 +434,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
         }
     }
     // 'm' over a pane: mute/unmute that track.
-    if (keyval == GDK_KEY_m) {
+    if (plain && keyval == GDK_KEY_m) {
         guint i;
         if (target_track(&i)) {
             Track *t = g_ptr_array_index(app.tracks, i);
@@ -368,11 +444,12 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
         }
     }
     // 's' over a pane: solo/unsolo that track within its bus.
-    if (keyval == GDK_KEY_s) {
+    if (plain && keyval == GDK_KEY_s) {
         guint i;
         if (target_track(&i)) {
             Track *t  = g_ptr_array_index(app.tracks, i);
             t->soloed = !t->soloed;
+            gtk_widget_queue_draw(g_ptr_array_index(app.waves, i)); // solo badge
             apply_audible();
             return TRUE;
         }
@@ -512,6 +589,7 @@ activate(GtkApplication *gapp, gpointer user)
     app.waves  = g_ptr_array_new();
     app.rows   = g_ptr_array_new();
     app.active = -1;
+    player_set_error_handler(on_player_error); // needs app.tracks
 
     GtkWidget *win = adw_application_window_new(gapp);
     app.win        = GTK_WINDOW(win);
@@ -565,9 +643,12 @@ activate(GtkApplication *gapp, gpointer user)
                                    GTK_POLICY_AUTOMATIC);
     gtk_widget_set_vexpand(scroll, TRUE);
 
+    app.toasts = adw_toast_overlay_new();
+    adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(app.toasts), scroll);
+
     GtkWidget *toolbar = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), scroll);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), app.toasts);
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(win), toolbar);
 
     GtkEventController *keys = gtk_event_controller_key_new();

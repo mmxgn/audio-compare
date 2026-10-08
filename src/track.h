@@ -17,11 +17,12 @@ typedef struct {
     gboolean inverted; // polarity flipped (x-1)
     gboolean muted;    // silenced regardless of the audible set
     gboolean soloed;   // when any track in the bus is soloed, only solos play
+    gboolean failed;   // its branch errored: not re-added on engine reset
 
     // Player branch handles (owned by the player, see player.c).
     GstElement       *branch; // bin: uridecodebin->convert->resample->amplify->volume
     GstElement       *vol;    // volume element inside the branch
-    GstElement       *amp;    // audioamplify, +1 normal / -1 inverted
+    GstElement       *amp;    // audioamplify, +POLARITY normal / -POLARITY inverted
     GstControlSource *vol_cs; // drives vol, switched sample-accurately on track change
     GstControlSource *amp_cs; // drives amp polarity, ramped to declick
     GstPad           *mixpad; // requested audiomixer sink pad
