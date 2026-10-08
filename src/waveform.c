@@ -77,8 +77,8 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
             }
             cairo_move_to(cr, x + 0.5, mid - hi * amp * sgn);
             cairo_line_to(cr, x + 0.5, mid - lo * amp * sgn);
-            cairo_stroke(cr);
         }
+        cairo_stroke(cr); // one stroke for all columns, not one per column
     }
 
     // caption: filename, top-left, same colour as the waveform
@@ -163,6 +163,23 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
         cairo_set_source_rgb(cr, 1, 1, 1);
         cairo_move_to(cr, bx + pad - be.x_bearing, by + pad - be.y_bearing);
         cairo_show_text(cr, label);
+    }
+
+    // solo badge: same box as the bus badge but bottom-right, so a solo left on
+    // another bus is visible instead of silently reapplying when you switch back
+    if (d->track->soloed) {
+        cairo_set_font_size(cr, 12);
+        cairo_text_extents_t se;
+        cairo_text_extents(cr, "S", &se);
+        double pad = 5, bw = se.width + 2 * pad, bh = 12 + 2 * pad;
+        double bx = w - 6 - bw, by = h - 6 - bh;
+
+        cairo_set_source_rgb(cr, 0.96, 0.76, 0.06);
+        cairo_rectangle(cr, bx, by, bw, bh);
+        cairo_fill(cr);
+        cairo_set_source_rgb(cr, 0, 0, 0);
+        cairo_move_to(cr, bx + pad - se.x_bearing, by + pad - se.y_bearing);
+        cairo_show_text(cr, "S");
     }
 
     // focus indicator: accent bar down the left edge of the keyboard-focused pane
@@ -279,7 +296,9 @@ waveform_set_dimmed(GtkWidget *wf, gboolean dimmed)
 void
 waveform_set_playhead(GtkWidget *wf, double frac)
 {
-    WfData *d   = g_object_get_data(G_OBJECT(wf), "wf");
-    d->playhead = frac;
-    gtk_widget_queue_draw(wf);
+    WfData *d = g_object_get_data(G_OBJECT(wf), "wf");
+    if (d->playhead != frac) {
+        d->playhead = frac;
+        gtk_widget_queue_draw(wf);
+    }
 }

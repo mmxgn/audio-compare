@@ -22,3 +22,6 @@ executable('audio-compare', [
   'src/player.c',
   'src/waveform.c',
 ], dependencies: deps, install: true)
+
+# Logic checks for the UI/state fixes; includes the sources, stubs the player.
+test('ui-state', executable('check', 'test/check.c', dependencies: deps, install: false))

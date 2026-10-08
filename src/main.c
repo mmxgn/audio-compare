@@ -15,7 +15,8 @@ typedef struct {
     GPtrArray *waves;        // GtkWidget* drawing area, parallel to tracks
     GPtrArray *rows;         // GtkWidget* pane container, parallel to tracks
     int        active;       // focused track, -1 if none
-    gboolean   playing;
+    gboolean   playing;      // intended play state; the pipeline follows it
+    gboolean   scrubbing;    // a scrub drag holds the pipeline paused
     guint      tick_id;
 } App;
 
@@ -39,11 +40,12 @@ static void
 apply_audible(void)
 {
     // Solo is scoped to the audible set: if any of its tracks is soloed, only
-    // the soloed ones play.
+    // the soloed ones play. A muted track doesn't count -- it can't satisfy its
+    // own solo, so counting it would silence the whole bus.
     gboolean any_solo = FALSE;
     for (guint i = 0; i < app.tracks->len; i++) {
         Track *t = g_ptr_array_index(app.tracks, i);
-        if (is_audible((int)i) && t->soloed)
+        if (is_audible((int)i) && t->soloed && !t->muted)
             any_solo = TRUE;
     }
 
@@ -97,6 +99,9 @@ toggle_play(void)
     if (app.active < 0)
         return;
     app.playing = !app.playing;
+    // Mid-scrub the pipeline is held paused on purpose; drag-end applies this.
+    if (app.scrubbing)
+        return;
     if (app.playing)
         player_play();
     else
@@ -160,7 +165,8 @@ on_wave_click(GtkWidget *wf, double frac, gpointer user)
         return;
     }
     Track *t = g_ptr_array_index(app.tracks, i);
-    player_seek((gint64)(frac * t->duration)); // scrub within the active pane
+    if (t->duration > 0)
+        player_seek((gint64)(frac * t->duration)); // scrub within the active pane
 }
 
 static void
@@ -195,6 +201,9 @@ remove_track(GtkWidget *row)
     if (app.tracks->len == 0) {
         app.active  = -1;
         app.playing = FALSE;
+        // player_remove() restored the state it captured before the removal, so
+        // the pipeline is still heading for PLAYING; park it to match the UI.
+        player_pause();
         show_placeholder();
     } else if (was_active) {
         app.active = MIN((int)i, (int)app.tracks->len - 1);
@@ -238,18 +247,13 @@ fit_window(void)
 }
 
 // Pause the pipeline during a scrub drag so the flushing seeks hit a stopped
-// sink (silent, no clicks); resume afterwards if it was playing.
-static gboolean scrub_was_playing;
+// sink (silent, no clicks); resume afterwards if app.playing still says so.
 static void
 on_wave_scrub(GtkWidget *wf, gboolean active, gpointer user)
 {
-    if (active) {
-        scrub_was_playing = app.playing;
-        if (app.playing)
-            player_pause();
-    } else if (scrub_was_playing) {
-        player_play();
-    }
+    app.scrubbing = active;
+    if (app.playing)
+        active ? player_pause() : player_play();
 }
 
 // Moving the mouse over a pane (enter or motion) switches to hover mode.
@@ -320,7 +324,9 @@ tick(gpointer user)
             for (guint i = 0; i < app.waves->len; i++) {
                 Track *ti   = g_ptr_array_index(app.tracks, i);
                 double frac = ti->duration > 0 ? (double)pos / ti->duration : 0;
-                waveform_set_playhead(g_ptr_array_index(app.waves, i), frac);
+                // Shorter tracks run out before the shared position does; park
+                // the playhead at the end instead of drawing it off-widget.
+                waveform_set_playhead(g_ptr_array_index(app.waves, i), CLAMP(frac, 0.0, 1.0));
             }
         }
     }
@@ -330,12 +336,20 @@ tick(gpointer user)
 static gboolean
 on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state, gpointer user)
 {
-    if (keyval == GDK_KEY_space) {
+    // An AdwDialog lives inside the window, so this capture-phase controller
+    // would otherwise eat its keys. Let the presented dialog have them.
+    if (adw_application_window_get_visible_dialog(ADW_APPLICATION_WINDOW(app.win)))
+        return FALSE;
+
+    // Unmodified keys only: Ctrl/Alt/Super combos belong to the app or the WM.
+    gboolean plain = !(state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK));
+
+    if (plain && keyval == GDK_KEY_space) {
         toggle_play();
         return TRUE;
     }
     // Digit over a pane: toggle that track's bus membership.
-    if (keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9) {
+    if (plain && keyval >= GDK_KEY_0 && keyval <= GDK_KEY_9) {
         guint i;
         if (target_track(&i)) {
             Track *t = g_ptr_array_index(app.tracks, i);
@@ -347,7 +361,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
         }
     }
     // '-' or 'i' over a pane: invert that track's polarity.
-    if (keyval == GDK_KEY_minus || keyval == GDK_KEY_i) {
+    if (plain && (keyval == GDK_KEY_minus || keyval == GDK_KEY_i)) {
         guint i;
         if (target_track(&i)) {
             Track *t    = g_ptr_array_index(app.tracks, i);
@@ -358,7 +372,7 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
         }
     }
     // 'm' over a pane: mute/unmute that track.
-    if (keyval == GDK_KEY_m) {
+    if (plain && keyval == GDK_KEY_m) {
         guint i;
         if (target_track(&i)) {
             Track *t = g_ptr_array_index(app.tracks, i);
@@ -368,11 +382,12 @@ on_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType state
         }
     }
     // 's' over a pane: solo/unsolo that track within its bus.
-    if (keyval == GDK_KEY_s) {
+    if (plain && keyval == GDK_KEY_s) {
         guint i;
         if (target_track(&i)) {
             Track *t  = g_ptr_array_index(app.tracks, i);
             t->soloed = !t->soloed;
+            gtk_widget_queue_draw(g_ptr_array_index(app.waves, i)); // solo badge
             apply_audible();
             return TRUE;
         }

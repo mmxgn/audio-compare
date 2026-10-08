@@ -21,6 +21,8 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
   numbered badge; ungrouped tracks play on their own.
 - Invert a track's polarity (×−1) to line it up against another for null tests;
   the waveform flips to show it.
+- Mute a track, or solo it within its bus; soloed tracks show an `S` badge so a
+  solo left on another bus is visible before you switch back to it.
 
 | Shortcut | Action |
 |---|---|
