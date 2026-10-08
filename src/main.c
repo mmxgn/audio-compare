@@ -47,10 +47,10 @@ apply_audible(void)
             any_solo = TRUE;
     }
 
-    // Read the clock once so every track's vol_cs is set to the same running-
-    // time sample. For identical content this makes the switch seamless; for
-    // different content the one-sample discontinuity is the inherent A/B trade-off.
-    GstClockTime when = (GstClockTime)player_running_time();
+    // One switch point for the whole sweep, so every track crosses on the same
+    // sample. It sits ahead of the audio already in flight, so the change is
+    // heard SWITCH_LEAD from now; see player_switch_time().
+    GstClockTime when = player_switch_time();
 
     for (guint i = 0; i < app.tracks->len; i++) {
         Track   *t    = g_ptr_array_index(app.tracks, i);

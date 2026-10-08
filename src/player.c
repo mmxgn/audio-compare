@@ -5,6 +5,14 @@
 
 #define INVERT_RAMP (30 * GST_MSECOND)
 
+// `volume` indexes its control source by stream time -- it syncs at
+// gst_segment_to_stream_time(PTS), which is what player_position() reports --
+// not by pipeline running time. The two only agree while playing straight
+// through from 0, so audible switches are scheduled off the position.
+
+// Declick only; `volume` interpolates the control source per sample.
+#define SWITCH_RAMP (5 * GST_MSECOND)
+
 static GstElement *pipeline;
 static GstElement *mixer;
 static guint       bus_watch;
@@ -163,20 +171,54 @@ player_remove(Track *t)
     }
 }
 
-// Switch a track's audibility at exactly `when` (pipeline running time).
-// Caller should pass the same `when` for all tracks in one apply_audible()
-// sweep so they all flip on the same audio sample.
+// Stream time to schedule the next audible-set change at. Read once per
+// apply_audible() sweep so every track crosses on the same sample.
+GstClockTime
+player_switch_time(void)
+{
+    gint64 pos = player_position();
+    if (pos < 0)
+        pos = 0;
+    // No clock means the pipeline has never played, so nothing is downstream of
+    // `volume` yet and the change can land at the current position.
+    GstClock *clock = gst_element_get_clock(pipeline);
+    if (!clock)
+        return (GstClockTime)pos;
+    gst_object_unref(clock);
+    return (GstClockTime)pos + SWITCH_LEAD;
+}
+
+// Switch a track's audibility at stream time `when`, from player_switch_time().
 void
 player_set_audible(Track *t, gboolean audible, GstClockTime when)
 {
     if (!t->vol_cs)
         return;
     GstTimedValueControlSource *tv = GST_TIMED_VALUE_CONTROL_SOURCE(t->vol_cs);
-    // Set a constant from `when` onwards. Adding the new point before removing
-    // stale ones ensures the control source is never empty (no undefined read).
-    gst_timed_value_control_source_set(tv, when, audible ? 1.0 : 0.0);
-    // Remove any earlier points that are now superseded.
-    gst_timed_value_control_source_unset(tv, 0);
+    double                      to = audible ? 1.0 : 0.0, from = 0.0;
+    // The last point always carries the gain this function commanded last time,
+    // so reading past the end of the source gives the track's current audible
+    // state regardless of where playback is -- no shadow copy needed.
+    gst_control_source_get_value(t->vol_cs, G_MAXINT64, &from);
+
+    // Rewrite the whole source every time so points cannot accumulate into an
+    // automation curve. `pos` is where playback is now; the five points give:
+    //   [0, pos)   `to`   -- a backward seek or the EOS loop lands on the
+    //                        current audible set, not on an old switch
+    //   [pos, when) `from` -- buffers already past `volume` play unchanged
+    //   when..+RAMP        -- the declick ramp
+    //   after when+RAMP `to`
+    // unset_all() first leaves the source empty for an instant, which is safe:
+    // the binding holds the property at `from` meanwhile, which is what the
+    // buffers in flight want. Leaving it *permanently* empty is the hazard, and
+    // the sets below rule that out.
+    GstClockTime pos = when > SWITCH_LEAD ? when - SWITCH_LEAD : 0;
+    gst_timed_value_control_source_unset_all(tv);
+    gst_timed_value_control_source_set(tv, 0, to);
+    gst_timed_value_control_source_set(tv, pos > SWITCH_RAMP ? pos - SWITCH_RAMP : 0, to);
+    gst_timed_value_control_source_set(tv, pos, from);
+    gst_timed_value_control_source_set(tv, when, from);
+    gst_timed_value_control_source_set(tv, when + SWITCH_RAMP, to);
 }
 
 void
