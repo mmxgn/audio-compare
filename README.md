@@ -19,6 +19,9 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
   All tracks on the active bus play together, mixed and in sample-accurate sync,
   so you can A/B two busses. Busses are shown by a coloured border and a
   numbered badge; ungrouped tracks play on their own.
+  The mix runs in floating point with a fixed -12 dB of master headroom, so a
+  bus of several tracks sums without clipping and busses keep their true
+  relative loudness. Everything plays quieter than the source files as a result.
 - Invert a track's polarity (×−1) to line it up against another for null tests;
   the waveform flips to show it.
 

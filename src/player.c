@@ -4,6 +4,9 @@
 #include <gst/controller/gstinterpolationcontrolsource.h>
 
 #define INVERT_RAMP (30 * GST_MSECOND)
+// Master headroom, applied once to the whole mix: -12 dB, i.e. room for four
+// tracks summing coherently at full scale before the sink has to clip.
+#define MIX_HEADROOM 0.25
 
 static GstElement *pipeline;
 static GstElement *mixer;
@@ -33,12 +36,23 @@ player_running_time(void)
 void
 player_init(void)
 {
-    pipeline         = gst_pipeline_new("player");
-    mixer            = gst_element_factory_make("audiomixer", "mix");
-    GstElement *conv = gst_element_factory_make("audioconvert", NULL);
-    GstElement *sink = gst_element_factory_make("autoaudiosink", NULL);
-    gst_bin_add_many(GST_BIN(pipeline), mixer, conv, sink, NULL);
-    gst_element_link_many(mixer, conv, sink, NULL);
+    pipeline           = gst_pipeline_new("player");
+    mixer              = gst_element_factory_make("audiomixer", "mix");
+    GstElement *master = gst_element_factory_make("volume", "master");
+    GstElement *conv   = gst_element_factory_make("audioconvert", NULL);
+    GstElement *sink   = gst_element_factory_make("autoaudiosink", NULL);
+    g_object_set(master, "volume", MIX_HEADROOM, NULL);
+    gst_bin_add_many(GST_BIN(pipeline), mixer, master, conv, sink, NULL);
+
+    // Force the mix itself into float: summing N tracks in the sources' native
+    // S16 saturates at full scale and destroys the sum, whereas float keeps it
+    // and `master` then scales the whole bus back under full scale. The same
+    // attenuation is applied to every bus, so busses stay comparable to each
+    // other and a bus of 3 stems is still louder than one of 1, as it should be.
+    GstCaps *f32 = gst_caps_new_simple("audio/x-raw", "format", G_TYPE_STRING, "F32LE", NULL);
+    gst_element_link_filtered(mixer, master, f32);
+    gst_caps_unref(f32);
+    gst_element_link_many(master, conv, sink, NULL);
 
     GstBus *bus = gst_element_get_bus(pipeline);
     bus_watch   = gst_bus_add_watch(bus, on_bus, NULL);
