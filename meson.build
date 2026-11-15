@@ -1,4 +1,6 @@
-project('audio-compare', 'c', version: '0.2.0', default_options: ['c_std=c11'])
+project('audio-compare', 'c', version: '0.3.0', default_options: ['c_std=c11'])
+
+add_project_arguments('-DAPP_VERSION="@0@"'.format(meson.project_version()), language: 'c')
 
 deps = [
   dependency('gtk4'),

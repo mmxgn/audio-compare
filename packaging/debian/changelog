@@ -1,3 +1,12 @@
+audio-compare (0.3.0-1) unstable; urgency=medium
+
+  * macOS support: Nix and Homebrew builds, self-contained .app and .dmg.
+  * Audio engine fixes: float mix with -12 dB headroom, sample-accurate
+    seeking and switching, polarity inversion, failed-track handling,
+    per-channel loudness, no hang on undecodable input.
+
+ -- mmxgn  Sun, 15 Nov 2026 12:29:32 -0000
+
 audio-compare (0.1.0-1) unstable; urgency=medium
 
   * Initial release.

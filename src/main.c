@@ -489,7 +489,7 @@ on_about(GSimpleAction *a, GVariant *p, gpointer user)
     AdwAboutDialog *d = ADW_ABOUT_DIALOG(adw_about_dialog_new());
     adw_about_dialog_set_application_name(d, "Audio Compare");
     adw_about_dialog_set_application_icon(d, "org.mmxgn.audiocompare");
-    adw_about_dialog_set_version(d, "0.1.0");
+    adw_about_dialog_set_version(d, APP_VERSION);
     adw_about_dialog_set_developer_name(d, "mmxgn");
     adw_about_dialog_set_website(d, "https://github.com/mmxgn/audio-compare");
     adw_about_dialog_set_license_type(d, GTK_LICENSE_GPL_3_0);
