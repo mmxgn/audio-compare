@@ -5,6 +5,13 @@
 #include "track.h"
 #include "waveform.h"
 
+// Name of the Alt modifier as the platform labels it on the keyboard.
+#ifdef __APPLE__
+#define ALT_KEY "Option"
+#else
+#define ALT_KEY "Alt"
+#endif
+
 typedef struct {
     GtkWindow *win;
     GtkWidget *list;         // vertical GtkBox of waveform panes
@@ -234,7 +241,7 @@ show_placeholder(void)
     app.placeholder = adw_status_page_new();
     adw_status_page_set_title(ADW_STATUS_PAGE(app.placeholder), "Drop audio files here");
     adw_status_page_set_description(ADW_STATUS_PAGE(app.placeholder),
-                                    "or use Open. Space plays, Alt+Up/Down switches.");
+                                    "or use Open. Space plays, " ALT_KEY "+Up/Down switches.");
     gtk_widget_set_vexpand(app.placeholder, TRUE);
     gtk_box_append(GTK_BOX(app.list), app.placeholder);
 }
@@ -517,7 +524,7 @@ on_shortcuts(GSimpleAction *a, GVariant *p, gpointer user)
 
     AdwPreferencesGroup *panes = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     adw_preferences_group_set_title(panes, "Panes");
-    add_shortcut(panes, "Switch active file", "Alt + ↑ / ↓");
+    add_shortcut(panes, "Switch active file", ALT_KEY " + ↑ / ↓");
     add_shortcut(panes, "Switch to a pane", "Click");
     add_shortcut(panes, "Scrub", "Click + drag");
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), panes);

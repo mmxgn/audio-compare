@@ -1,3 +1,18 @@
+# Build directories (meson: build/, build-mac/, build-nix/, build-macos-app/, ...)
 /build/
+/build-*/
+
+# Nix build output links
 /result
+/result-*
+
+# Packaging output (.app, .dmg, AppImage, ...)
+/dist/
+/.dist/
+*.dmg
+*.AppImage
+
+# Tooling caches
 /.cache/
+__pycache__/
+.DS_Store
