@@ -1,7 +1,7 @@
 Source: audio-compare
 Section: sound
 Priority: optional
-Maintainer: mmxgn
+Maintainer: mmxgn <mmxgn@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13), meson, ninja-build, gcc,
   libgtk-4-dev, libadwaita-1-dev,
   libgstreamer1.0-dev, libgstreamer-plugins-base1.0-dev, libebur128-dev

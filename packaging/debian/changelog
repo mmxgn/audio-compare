@@ -1,3 +1,9 @@
+audio-compare (0.3.1-1) unstable; urgency=medium
+
+  * Fix Debian packaging: add maintainer email so the .deb builds again.
+
+ -- mmxgn <mmxgn@users.noreply.github.com>  Sun, 15 Nov 2026 12:38:07 +0000
+
 audio-compare (0.3.0-1) unstable; urgency=medium
 
   * macOS support: Nix and Homebrew builds, self-contained .app and .dmg.
@@ -5,10 +11,10 @@ audio-compare (0.3.0-1) unstable; urgency=medium
     seeking and switching, polarity inversion, failed-track handling,
     per-channel loudness, no hang on undecodable input.
 
- -- mmxgn  Sun, 15 Nov 2026 12:29:32 -0000
+ -- mmxgn <mmxgn@users.noreply.github.com>  Sun, 15 Nov 2026 12:29:32 +0000
 
 audio-compare (0.1.0-1) unstable; urgency=medium
 
   * Initial release.
 
- -- mmxgn  Wed, 15 Jul 2026 00:00:00 +0000
+ -- mmxgn <mmxgn@users.noreply.github.com>  Wed, 15 Jul 2026 00:00:00 +0000
