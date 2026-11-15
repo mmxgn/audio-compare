@@ -34,3 +34,35 @@ jobs:
             libgtk-4-dev libadwaita-1-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libebur128-dev
       - run: meson setup build && ninja -C build
+
+  macos:
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: brew install meson ninja pkg-config gtk4 libadwaita gstreamer libebur128 librsvg
+      - run: meson setup build && ninja -C build
+      # Also proves the .app is self-contained: make-app.py fails if any
+      # bundled binary still references /opt/homebrew.
+      - name: Build .app and .dmg
+        run: packaging/macos/make-app.py --dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audio-compare-macos-dmg
+          path: dist/*.dmg
+          retention-days: 14
+
+  nix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix build -L

@@ -99,3 +99,22 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: "*.rpm"
+
+  dmg:
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: brew install meson ninja pkg-config gtk4 libadwaita gstreamer libebur128 librsvg
+
+      - name: Build .app and .dmg
+        run: packaging/macos/make-app.py --dmg
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
