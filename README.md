@@ -54,8 +54,26 @@ chmod +x audio-compare-*.AppImage && ./audio-compare-*.AppImage
 ### macOS
 
 The app runs natively on macOS (GTK's macOS backend, audio through Core Audio).
-It can be run from a terminal (Nix or Homebrew below) or packaged as a
-standalone `.app` / `.dmg`.
+Download the `.dmg`, run it with Nix, or build it with Homebrew.
+
+**Download** — get `audio-compare-<version>-arm64.dmg` from the
+[releases page](https://github.com/mmxgn/audio-compare/releases/latest)
+(Apple Silicon, macOS 15 or newer), open it and drag **Audio Compare** to
+Applications.
+
+The app is ad-hoc signed but not notarized by Apple, so macOS blocks it the
+first time ("Apple could not verify…" or "…is damaged"). On macOS 15 and newer,
+right-click → Open no longer gets past this; use one of these once:
+
+- **System Settings**: try to open the app and dismiss the warning, then go to
+  **System Settings → Privacy & Security**, click **Open Anyway** next to
+  "Audio Compare was blocked", and confirm.
+- **Terminal**: remove the download quarantine flag:
+  ```sh
+  xattr -dr com.apple.quarantine "/Applications/Audio Compare.app"
+  ```
+
+After that it opens normally.
 
 **With Nix** — install [Nix](https://nixos.org/download/) with flakes enabled, then:
 ```sh
@@ -82,9 +100,9 @@ brew install meson ninja pkg-config gtk4 libadwaita gstreamer libebur128 librsvg
 packaging/macos/make-app.py          # dist/Audio Compare.app
 packaging/macos/make-app.py --dmg    # also dist/audio-compare-<version>-<arch>.dmg
 ```
-The bundle is ad-hoc signed, not notarized: on another Mac, right-click → Open
-the first time (or `xattr -dr com.apple.quarantine "Audio Compare.app"`).
-It runs on the CPU architecture and macOS version it was built on and newer,
+A locally built app isn't quarantined, so it opens directly on the Mac that
+built it. Copied to another Mac it is blocked like a download; see the steps
+above. It runs on the CPU architecture and macOS version it was built on and newer,
 because the Homebrew bottles it copies target that macOS release.
 
 ## Develop
