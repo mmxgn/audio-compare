@@ -49,7 +49,8 @@ chmod +x audio-compare-*.AppImage && ./audio-compare-*.AppImage
 ### macOS
 
 The app runs natively on macOS (GTK's macOS backend, audio through Core Audio).
-There is no `.app` bundle yet, so it is launched from a terminal.
+It can be run from a terminal (Nix or Homebrew below) or packaged as a
+standalone `.app` / `.dmg`.
 
 **With Nix** — install [Nix](https://nixos.org/download/) with flakes enabled, then:
 ```sh
@@ -67,6 +68,19 @@ Notes:
 - The first launch after installing GStreamer prints plugin-scanner warnings
   (`gi.repository.Gst`, duplicate `objc` classes) while GStreamer builds its
   plugin cache. They are harmless and do not reappear.
+
+**`.app` and `.dmg`** — build a self-contained `Audio Compare.app` from the
+Homebrew stack (all libraries and GStreamer plugins are copied into the bundle,
+so it runs without Homebrew installed):
+```sh
+brew install meson ninja pkg-config gtk4 libadwaita gstreamer libebur128 librsvg
+packaging/macos/make-app.py          # dist/Audio Compare.app
+packaging/macos/make-app.py --dmg    # also dist/audio-compare-<version>-<arch>.dmg
+```
+The bundle is ad-hoc signed, not notarized: on another Mac, right-click → Open
+the first time (or `xattr -dr com.apple.quarantine "Audio Compare.app"`).
+It runs on the CPU architecture and macOS version it was built on and newer,
+because the Homebrew bottles it copies target that macOS release.
 
 ## Develop
 
