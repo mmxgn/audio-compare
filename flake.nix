@@ -1,26 +1,31 @@
 {
   description = "audio-compare - compare audio files by ear";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs = { self, nixpkgs }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-      gst = with pkgs.gst_all_1; [
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      gstFor = pkgs: with pkgs.gst_all_1; [
         gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly
       ];
     in {
-      packages.${system}.default = pkgs.stdenv.mkDerivation {
-        pname = "audio-compare";
-        version = "0.1.0";
-        src = pkgs.lib.cleanSource ./.;
-        nativeBuildInputs = with pkgs; [ meson ninja pkg-config wrapGAppsHook4 ];
-        buildInputs = [ pkgs.gtk4 pkgs.libadwaita pkgs.libebur128 ] ++ gst;
-      };
+      packages = forAllSystems (pkgs: {
+        default = pkgs.stdenv.mkDerivation {
+          pname = "audio-compare";
+          version = "0.2.0";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = with pkgs; [ meson ninja pkg-config wrapGAppsHook4 ];
+          buildInputs = [ pkgs.gtk4 pkgs.libadwaita pkgs.libebur128 ] ++ gstFor pkgs;
+        };
+      });
 
-      devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ gcc pkg-config gtk4 libadwaita libebur128 meson ninja ] ++ gst;
-      };
+      devShells = forAllSystems (pkgs: {
+        # mkShell's stdenv supplies the C compiler (gcc on Linux, clang on macOS).
+        default = pkgs.mkShell {
+          packages = with pkgs; [ pkg-config gtk4 libadwaita libebur128 meson ninja ] ++ gstFor pkgs;
+        };
+      });
     };
 }

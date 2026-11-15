@@ -36,15 +36,37 @@ Load some files, see their waveforms stacked, and A/B them at the same playback 
 
 ## Install
 
-**Nix**
+**Nix** (Linux and macOS, x86_64 and Apple Silicon)
 ```sh
 nix run github:mmxgn/audio-compare
 ```
 
-**AppImage** — grab the latest from the [releases page](https://github.com/mmxgn/audio-compare/releases/latest).
+**AppImage** (Linux) — grab the latest from the [releases page](https://github.com/mmxgn/audio-compare/releases/latest).
 ```sh
 chmod +x audio-compare-*.AppImage && ./audio-compare-*.AppImage
 ```
+
+### macOS
+
+The app runs natively on macOS (GTK's macOS backend, audio through Core Audio).
+There is no `.app` bundle yet, so it is launched from a terminal.
+
+**With Nix** — install [Nix](https://nixos.org/download/) with flakes enabled, then:
+```sh
+nix run github:mmxgn/audio-compare
+```
+
+**With Homebrew** — build from a checkout:
+```sh
+brew install meson ninja pkg-config gtk4 libadwaita gstreamer libebur128
+meson setup build && ninja -C build && ./build/audio-compare
+```
+
+Notes:
+- `Alt` in the shortcuts table is the `Option` (⌥) key, so switching files is `⌥↑` / `⌥↓`.
+- The first launch after installing GStreamer prints plugin-scanner warnings
+  (`gi.repository.Gst`, duplicate `objc` classes) while GStreamer builds its
+  plugin cache. They are harmless and do not reappear.
 
 ## Develop
 
@@ -52,6 +74,8 @@ chmod +x audio-compare-*.AppImage && ./audio-compare-*.AppImage
 nix develop
 meson setup build && ninja -C build && ./build/audio-compare
 ```
+
+The dev shell works the same on Linux and macOS (it uses gcc on Linux, clang on macOS).
 
 ## Requirements
 
