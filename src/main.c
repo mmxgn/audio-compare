@@ -541,6 +541,42 @@ on_shortcuts(GSimpleAction *a, GVariant *p, gpointer user)
     adw_dialog_present(ADW_DIALOG(d), GTK_WIDGET(app.win));
 }
 
+// The only gate a track URI passes through: a regular local file, turned into
+// a URI by GLib so it is always percent-encoded. g_file_get_uri() on a GIO
+// placeholder file (a non-local "scheme:..." argument or drop) hands back the
+// raw string, so a URI is never taken from anywhere else. Rejects remote and
+// GVfs locations, directories, FIFOs and device nodes.
+static char *
+local_audio_uri(GFile *file)
+{
+    if (!g_file_is_native(file))
+        return NULL;
+    if (g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_REGULAR)
+        return NULL;
+    char *path = g_file_get_path(file);
+    if (!path)
+        return NULL;
+    char *uri = g_filename_to_uri(path, NULL, NULL);
+    g_free(path);
+    return uri;
+}
+
+static void
+add_track_from_file(GFile *file)
+{
+    char *uri = local_audio_uri(file);
+    if (!uri) {
+        char *shown = g_file_get_parse_name(file);
+        char *msg = g_strdup_printf("Cannot open %s: only local audio files are supported", shown);
+        toast(msg);
+        g_free(msg);
+        g_free(shown);
+        return;
+    }
+    add_track(uri);
+    g_free(uri);
+}
+
 static void
 on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
 {
@@ -552,10 +588,8 @@ on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
     }
     guint n = g_list_model_get_n_items(files);
     for (guint i = 0; i < n; i++) {
-        GFile *f   = g_list_model_get_item(files, i);
-        char  *uri = g_file_get_uri(f);
-        add_track(uri);
-        g_free(uri);
+        GFile *f = g_list_model_get_item(files, i);
+        add_track_from_file(f);
         g_object_unref(f);
     }
     g_object_unref(files);
@@ -575,11 +609,8 @@ on_drop(GtkDropTarget *t, const GValue *value, double x, double y, gpointer user
     if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
         return FALSE;
     GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
-    for (GSList *l = files; l; l = l->next) {
-        char *uri = g_file_get_uri(l->data);
-        add_track(uri);
-        g_free(uri);
-    }
+    for (GSList *l = files; l; l = l->next)
+        add_track_from_file(l->data);
     g_slist_free(files);
     return TRUE;
 }
@@ -678,11 +709,8 @@ static void
 on_app_open(GApplication *gapp, GFile **files, gint n_files, const gchar *hint, gpointer user)
 {
     activate(GTK_APPLICATION(gapp), NULL);
-    for (gint i = 0; i < n_files; i++) {
-        char *uri = g_file_get_uri(files[i]);
-        add_track(uri);
-        g_free(uri);
-    }
+    for (gint i = 0; i < n_files; i++)
+        add_track_from_file(files[i]);
     if (app.active >= 0 && !app.playing)
         toggle_play();
 }

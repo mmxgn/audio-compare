@@ -8,24 +8,41 @@
 #define SAMPLES_PER_PEAK 512
 #define ANALYZE_RATE 48000
 
+// The pipeline description is a constant: the URI goes in as a typed property,
+// never as parse-launch text. Formatting it into the description let a quote in
+// the URI close the uri= value and splice arbitrary elements into the pipeline.
+// Do not "fix" that by escaping -- the grammar has more metacharacters than `"`.
+GstElement *
+track_analysis_pipeline(const char *uri, GstAppSink **sink_out)
+{
+    GError     *err = NULL;
+    GstElement *pipe
+        = gst_parse_launch_full("uridecodebin name=src ! audioconvert ! audioresample ! "
+                                "audio/x-raw,format=F32LE,rate=" G_STRINGIFY(
+                                    ANALYZE_RATE) " ! appsink name=sink sync=false",
+                                NULL, GST_PARSE_FLAG_FATAL_ERRORS, &err);
+    if (!pipe) {
+        g_warning("peaks: %s", err ? err->message : "parse failed");
+        g_clear_error(&err);
+        return NULL;
+    }
+    GstElement *src = gst_bin_get_by_name(GST_BIN(pipe), "src");
+    g_object_set(src, "uri", uri, NULL); // a value, never syntax
+    gst_object_unref(src);
+    *sink_out = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(pipe), "sink"));
+    return pipe;
+}
+
 // ponytail: blocking decode on the calling thread. TDD open question --
 // move to a worker if large files stall the UI.
 static void
 extract_peaks(Track *t)
 {
-    char       *desc = g_strdup_printf("uridecodebin uri=\"%s\" ! audioconvert ! audioresample ! "
-                                             "audio/x-raw,format=F32LE,rate=%d ! appsink name=sink sync=false",
-                                       t->uri, ANALYZE_RATE);
-    GError     *err  = NULL;
-    GstElement *pipe = gst_parse_launch(desc, &err);
-    g_free(desc);
-    if (!pipe) {
-        g_warning("peaks: %s", err ? err->message : "parse failed");
-        g_clear_error(&err);
+    GstAppSink *sink = NULL;
+    GstElement *pipe = track_analysis_pipeline(t->uri, &sink);
+    if (!pipe)
         return;
-    }
 
-    GstAppSink *sink = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(pipe), "sink"));
     gst_element_set_state(pipe, GST_STATE_PLAYING);
 
     // Bounded wait: pull_sample() below blocks forever if the appsink never

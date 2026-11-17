@@ -1,5 +1,6 @@
 #pragma once
 
+#include <gst/app/gstappsink.h>
 #include <gst/gst.h>
 
 typedef struct {
@@ -29,4 +30,6 @@ typedef struct {
 } Track;
 
 Track *track_new(const char *uri);
-void   track_free(Track *t);
+// The fixed analysis chain with `uri` set as a property; NULL on failure.
+GstElement *track_analysis_pipeline(const char *uri, GstAppSink **sink_out);
+void        track_free(Track *t);
