@@ -79,6 +79,15 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
             cairo_line_to(cr, x + 0.5, mid - lo * amp * sgn);
         }
         cairo_stroke(cr); // one stroke for all columns, not one per column
+    } else if (d->track->analysing) {
+        static const char msg[] = "Analysing…";
+        cairo_set_source_rgb(cr, fg.red, fg.green, fg.blue);
+        cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_ITALIC, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 13);
+        cairo_text_extents_t e;
+        cairo_text_extents(cr, msg, &e);
+        cairo_move_to(cr, (w - e.width) / 2 - e.x_bearing, mid - e.height / 2 - e.y_bearing);
+        cairo_show_text(cr, msg);
     }
 
     // caption: filename, top-left, same colour as the waveform
@@ -90,11 +99,15 @@ draw(GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer user)
 
     // loudness stats, top-right (leaving room for the close button)
     char tp[24], lu[24], stats[52];
-    if (isfinite(d->track->dbtp))
+    if (d->track->analysing)
+        g_strlcpy(tp, "… dBTP", sizeof tp);
+    else if (isfinite(d->track->dbtp))
         g_snprintf(tp, sizeof tp, "%.1f dBTP", d->track->dbtp);
     else
         g_strlcpy(tp, "-inf dBTP", sizeof tp);
-    if (isfinite(d->track->lufs))
+    if (d->track->analysing)
+        g_strlcpy(lu, "… LUFS", sizeof lu);
+    else if (isfinite(d->track->lufs))
         g_snprintf(lu, sizeof lu, "%.1f LUFS", d->track->lufs);
     else
         g_strlcpy(lu, "-inf LUFS", sizeof lu);
