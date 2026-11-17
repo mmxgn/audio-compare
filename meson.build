@@ -27,3 +27,9 @@ executable('audio-compare', [
 
 # Logic checks for the UI/state fixes; includes the sources, stubs the player.
 test('ui-state', executable('check', 'test/check.c', dependencies: deps, install: false))
+
+# Real player.c: tearing down a failed branch must not hang the main loop.
+# Needs an audio sink to preroll against; exits 77 (skipped) without one.
+test('teardown', executable('teardown', 'test/teardown.c', 'src/player.c',
+  include_directories: include_directories('src'), dependencies: deps, install: false),
+  is_parallel: false, timeout: 60)
