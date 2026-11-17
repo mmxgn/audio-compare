@@ -47,7 +47,10 @@ nix run github:mmxgn/audio-compare
 ```
 
 **AppImage** (Linux) — grab the latest from the [releases page](https://github.com/mmxgn/audio-compare/releases/latest).
+Each release also carries a `SHA256SUMS` file. Download it next to the
+AppImage and check before running:
 ```sh
+sha256sum --check --ignore-missing SHA256SUMS
 chmod +x audio-compare-*.AppImage && ./audio-compare-*.AppImage
 ```
 
