@@ -8,6 +8,17 @@
 #define SAMPLES_PER_PEAK 512
 #define ANALYZE_RATE 48000
 
+// Analysis limits. Without them a tiny, highly compressible file (hours of
+// constant-value FLAC) or a source that never ends decoded into RAM as fast as
+// it could, and a source that stalled without EOS blocked the UI forever.
+// Decoded-but-unanalysed audio is capped at a few buffers (the decoder waits,
+// nothing is dropped), analysis stops after MAX_ANALYZE_SECONDS, and a source
+// that produces nothing for STALL_TIMEOUT is abandoned.
+#define MAX_QUEUED_BUFFERS 16
+#define MAX_ANALYZE_SECONDS (4 * 60 * 60)
+#define MAX_ANALYZE_FRAMES ((guint64)MAX_ANALYZE_SECONDS * ANALYZE_RATE)
+#define STALL_TIMEOUT (5 * GST_SECOND)
+
 // The pipeline description is a constant: the URI goes in as a typed property,
 // never as parse-launch text. Formatting it into the description let a quote in
 // the URI close the uri= value and splice arbitrary elements into the pipeline.
@@ -30,6 +41,10 @@ track_analysis_pipeline(const char *uri, GstAppSink **sink_out)
     g_object_set(src, "uri", uri, NULL); // a value, never syntax
     gst_object_unref(src);
     *sink_out = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(pipe), "sink"));
+    // Backpressure: block the decoder once a few buffers are waiting. drop
+    // stays FALSE, so no audio is skipped -- the decoder just waits for us.
+    gst_app_sink_set_max_buffers(*sink_out, MAX_QUEUED_BUFFERS);
+    gst_app_sink_set_drop(*sink_out, FALSE);
     return pipe;
 }
 
@@ -57,17 +72,37 @@ extract_peaks(Track *t)
         return;
     }
 
+    track_analyze(t, pipe, sink, MAX_ANALYZE_FRAMES, STALL_TIMEOUT);
+
+    gst_object_unref(sink);
+    gst_element_set_state(pipe, GST_STATE_NULL); // also unblocks a full appsink
+    gst_object_unref(pipe);
+}
+
+// Pull decoded audio from a running analysis pipeline into t: peaks, loudness,
+// true peak and duration. Stops at EOS, an error, `max_frames`, or once nothing
+// arrives for `stall_timeout`, and records why in t->truncated / t->stalled.
+void
+track_analyze(Track *t, GstElement *pipe, GstAppSink *sink, guint64 max_frames,
+              GstClockTime stall_timeout)
+{
     // R128 is defined per channel, and the channel count only arrives on the caps
     // of the first sample, so the state is created lazily in the loop.
     ebur128_state *r128     = NULL;
     int            channels = 0;
 
-    float cmin = 0, cmax = 0;
-    int   count = 0;
+    float   cmin = 0, cmax = 0;
+    int     count = 0;
+    guint64 total = 0; // frames analysed
     for (;;) {
-        GstSample *sample = gst_app_sink_pull_sample(sink);
-        if (!sample)
-            break; // EOS or error
+        GstSample *sample = gst_app_sink_try_pull_sample(sink, stall_timeout);
+        if (!sample) {
+            // NULL is EOS, an error, or the timeout; only the last is not EOS.
+            // An error is told apart on the bus below.
+            if (!gst_app_sink_is_eos(sink))
+                t->stalled = TRUE;
+            break;
+        }
 
         int           ch   = 0;
         GstCaps      *caps = gst_sample_get_caps(sample);
@@ -95,8 +130,13 @@ extract_peaks(Track *t)
         GstBuffer *buf = gst_sample_get_buffer(sample);
         GstMapInfo map;
         if (gst_buffer_map(buf, &map, GST_MAP_READ)) {
-            float *data   = (float *)map.data;
-            guint  frames = map.size / sizeof(float) / channels;
+            float  *data   = (float *)map.data;
+            guint64 frames = map.size / sizeof(float) / channels;
+            if (frames >= max_frames - total) {
+                frames       = max_frames - total;
+                t->truncated = TRUE;
+            }
+            total += frames;
             ebur128_add_frames_float(r128, data, frames);
             for (guint i = 0; i < frames; i++) {
                 // The waveform wants one min/max pair per bucket, so collapse the
@@ -122,6 +162,8 @@ extract_peaks(Track *t)
             gst_buffer_unmap(buf, &map);
         }
         gst_sample_unref(sample);
+        if (t->truncated)
+            break;
     }
     if (count > 0) {
         Peak p = { cmin, cmax };
@@ -137,6 +179,9 @@ extract_peaks(Track *t)
     if (msg) {
         g_warning("peaks: decode of %s stopped early, waveform is incomplete", t->uri);
         gst_message_unref(msg);
+        t->stalled = FALSE; // it errored rather than stalled; already reported
+    } else if (t->stalled) {
+        g_warning("peaks: decode of %s stalled, waveform is incomplete", t->uri);
     }
     gst_object_unref(bus);
 
@@ -150,9 +195,12 @@ extract_peaks(Track *t)
         ebur128_destroy(&r128);
     }
 
-    gst_object_unref(sink);
-    gst_element_set_state(pipe, GST_STATE_NULL);
-    gst_object_unref(pipe);
+    // Duration from the decoded peak count (one peak per 512 frames at 48 kHz),
+    // so the playhead lines up with the drawn peaks. Scaled with a wide
+    // intermediate: the plain product overflowed gint64 past ~53 hours.
+    if (t->peaks->len > 0)
+        t->duration = (gint64)gst_util_uint64_scale((guint64)t->peaks->len * SAMPLES_PER_PEAK,
+                                                    GST_SECOND, ANALYZE_RATE);
 }
 
 Track *
@@ -171,11 +219,6 @@ track_new(const char *uri)
     g_object_unref(f);
 
     extract_peaks(t);
-
-    // Duration from the decoded peak count (one peak per 512 frames at 48 kHz).
-    if (t->peaks->len > 0)
-        t->duration = (gint64)t->peaks->len * SAMPLES_PER_PEAK * GST_SECOND / ANALYZE_RATE;
-
     return t;
 }
 

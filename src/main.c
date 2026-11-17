@@ -343,6 +343,13 @@ static void
 add_track(const char *uri)
 {
     Track *t = track_new(uri);
+    if (t->truncated || t->stalled) {
+        char *msg = g_strdup_printf(t->truncated ? "%s is very long: showing only the first 4 hours"
+                                                 : "%s stopped decoding: waveform is incomplete",
+                                    t->name);
+        toast(msg);
+        g_free(msg);
+    }
     g_ptr_array_add(app.tracks, t);
     player_add(t);
 
