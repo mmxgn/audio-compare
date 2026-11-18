@@ -243,7 +243,8 @@ show_placeholder(void)
     app.placeholder = adw_status_page_new();
     adw_status_page_set_title(ADW_STATUS_PAGE(app.placeholder), "Drop audio files here");
     adw_status_page_set_description(ADW_STATUS_PAGE(app.placeholder),
-                                    "or use " OPEN_HINT ". Space plays, " ALT_KEY "+Up/Down switches.");
+                                    "or use " OPEN_HINT ". Space plays, " ALT_KEY
+                                    "+Up/Down switches.");
     gtk_widget_set_vexpand(app.placeholder, TRUE);
     gtk_box_append(GTK_BOX(app.list), app.placeholder);
 }
@@ -627,7 +628,8 @@ setup_macos_menubar(GtkApplication *gapp)
     gtk_application_set_accels_for_action(gapp, "app.open", (const char *[]){ "<Meta>o", NULL });
     gtk_application_set_accels_for_action(gapp, "app.close", (const char *[]){ "<Meta>w", NULL });
     gtk_application_set_accels_for_action(gapp, "app.quit", (const char *[]){ "<Meta>q", NULL });
-    gtk_application_set_accels_for_action(gapp, "app.reset", (const char *[]){ "<Meta><Shift>r", NULL });
+    gtk_application_set_accels_for_action(gapp, "app.reset",
+                                          (const char *[]){ "<Meta><Shift>r", NULL });
     gtk_application_set_accels_for_action(gapp, "app.shortcuts",
                                           (const char *[]){ "<Meta>question", NULL });
 
