@@ -8,8 +8,10 @@
 // Name of the Alt modifier as the platform labels it on the keyboard.
 #ifdef __APPLE__
 #define ALT_KEY "Option"
+#define OPEN_HINT "File › Open (⌘O)"
 #else
 #define ALT_KEY "Alt"
+#define OPEN_HINT "Open"
 #endif
 
 typedef struct {
@@ -242,7 +244,8 @@ show_placeholder(void)
     app.placeholder = adw_status_page_new();
     adw_status_page_set_title(ADW_STATUS_PAGE(app.placeholder), "Drop audio files here");
     adw_status_page_set_description(ADW_STATUS_PAGE(app.placeholder),
-                                    "or use Open. Space plays, " ALT_KEY "+Up/Down switches.");
+                                    "or use " OPEN_HINT ". Space plays, " ALT_KEY
+                                    "+Up/Down switches.");
     gtk_widget_set_vexpand(app.placeholder, TRUE);
     gtk_box_append(GTK_BOX(app.list), app.placeholder);
 }
@@ -566,6 +569,17 @@ on_shortcuts(GSimpleAction *a, GVariant *p, gpointer user)
     add_shortcut(play, "Seek 100 ms", "Ctrl + ← / →");
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), play);
 
+#ifdef __APPLE__
+    AdwPreferencesGroup *gen = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
+    adw_preferences_group_set_title(gen, "General");
+    add_shortcut(gen, "Open files", "⌘ O");
+    add_shortcut(gen, "Close window", "⌘ W");
+    add_shortcut(gen, "Reset audio engine", "⌘ ⇧ R");
+    add_shortcut(gen, "Quit", "⌘ Q");
+    add_shortcut(gen, "Keyboard shortcuts", "⌘ ?");
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), gen);
+#endif
+
     AdwPreferencesGroup *panes = ADW_PREFERENCES_GROUP(adw_preferences_group_new());
     adw_preferences_group_set_title(panes, "Panes");
     add_shortcut(panes, "Switch active file", ALT_KEY " + ↑ / ↓");
@@ -659,6 +673,64 @@ on_drop(GtkDropTarget *t, const GValue *value, double x, double y, gpointer user
     return TRUE;
 }
 
+#ifdef __APPLE__
+static void
+on_menu_action(GSimpleAction *a, GVariant *p, gpointer user)
+{
+    const char *name = g_action_get_name(G_ACTION(a));
+    if (g_str_equal(name, "open"))
+        on_open(NULL, NULL);
+    else if (g_str_equal(name, "reset"))
+        on_reset(NULL, NULL);
+    else if (g_str_equal(name, "close") && app.win)
+        gtk_window_close(app.win);
+    else if (g_str_equal(name, "quit"))
+        g_application_quit(G_APPLICATION(user));
+}
+
+// Global menu bar: File / Playback / Help. The app menu (first, bold) is
+// built by GTK itself.
+static void
+setup_macos_menubar(GtkApplication *gapp)
+{
+    static const char *names[] = { "open", "reset", "close", "quit" };
+    for (guint i = 0; i < G_N_ELEMENTS(names); i++) {
+        GSimpleAction *act = g_simple_action_new(names[i], NULL);
+        g_signal_connect(act, "activate", G_CALLBACK(on_menu_action), gapp);
+        g_action_map_add_action(G_ACTION_MAP(gapp), G_ACTION(act));
+        g_object_unref(act);
+    }
+    gtk_application_set_accels_for_action(gapp, "app.open", (const char *[]){ "<Meta>o", NULL });
+    gtk_application_set_accels_for_action(gapp, "app.close", (const char *[]){ "<Meta>w", NULL });
+    gtk_application_set_accels_for_action(gapp, "app.quit", (const char *[]){ "<Meta>q", NULL });
+    gtk_application_set_accels_for_action(gapp, "app.reset",
+                                          (const char *[]){ "<Meta><Shift>r", NULL });
+    gtk_application_set_accels_for_action(gapp, "app.shortcuts",
+                                          (const char *[]){ "<Meta>question", NULL });
+
+    GMenu *bar = g_menu_new();
+
+    GMenu *file = g_menu_new();
+    g_menu_append(file, "Open…", "app.open");
+    g_menu_append(file, "Close Window", "app.close");
+    g_menu_append_submenu(bar, "File", G_MENU_MODEL(file));
+    g_object_unref(file);
+
+    GMenu *playback = g_menu_new();
+    g_menu_append(playback, "Reset Audio Engine", "app.reset");
+    g_menu_append_submenu(bar, "Playback", G_MENU_MODEL(playback));
+    g_object_unref(playback);
+
+    GMenu *help = g_menu_new();
+    g_menu_append(help, "Keyboard Shortcuts", "app.shortcuts");
+    g_menu_append_submenu(bar, "Help", G_MENU_MODEL(help));
+    g_object_unref(help);
+
+    gtk_application_set_menubar(gapp, G_MENU_MODEL(bar));
+    g_object_unref(bar);
+}
+#endif
+
 static void
 activate(GtkApplication *gapp, gpointer user)
 {
@@ -678,6 +750,7 @@ activate(GtkApplication *gapp, gpointer user)
     gtk_window_set_title(app.win, "Audio Compare");
     gtk_window_set_default_size(app.win, 800, 600);
 
+#ifndef __APPLE__
     GtkWidget *open = gtk_button_new_with_label("Open");
     g_signal_connect(open, "clicked", G_CALLBACK(on_open), NULL);
 
@@ -686,6 +759,7 @@ activate(GtkApplication *gapp, gpointer user)
     gtk_widget_set_focusable(reset, FALSE);
     gtk_widget_add_css_class(reset, "destructive-action"); // red, stands out
     g_signal_connect(reset, "clicked", G_CALLBACK(on_reset), NULL);
+#endif
 
     // Primary (hamburger) menu with Shortcuts and About.
     GSimpleAction *act_sc = g_simple_action_new("shortcuts", NULL);
@@ -698,6 +772,17 @@ activate(GtkApplication *gapp, gpointer user)
     g_action_map_add_action(G_ACTION_MAP(gapp), G_ACTION(act_about));
     g_object_unref(act_about);
 
+#ifdef __APPLE__
+    // macOS: menus live in the global menu bar. GTK fills the app menu
+    // (About / Hide / Quit) from app.about and app.quit.
+    setup_macos_menubar(gapp);
+    gtk_application_window_set_show_menubar(GTK_APPLICATION_WINDOW(win), FALSE);
+
+    // Plain GtkHeaderBar so the window gets native traffic-light buttons.
+    GtkWidget *header = gtk_header_bar_new();
+    gtk_header_bar_set_use_native_controls(GTK_HEADER_BAR(header), TRUE);
+    // Open and Reset live in the File / Playback menus instead.
+#else
     GMenu *menu = g_menu_new();
     g_menu_append(menu, "Keyboard Shortcuts", "app.shortcuts");
     g_menu_append(menu, "About Audio Compare", "app.about");
@@ -710,6 +795,7 @@ activate(GtkApplication *gapp, gpointer user)
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), open);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), hamburger);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), reset);
+#endif
 
     app.list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_top(app.list, 6);
