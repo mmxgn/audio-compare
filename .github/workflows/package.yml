@@ -5,14 +5,18 @@ on:
     tags:
       - 'v*'
 
+# Build jobs get a read-only token. Only `publish`, which runs no build tooling
+# and no third-party action, can write to releases.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   appimage:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install deps
         run: |
@@ -28,16 +32,28 @@ jobs:
           ninja -C build
           DESTDIR="$PWD/AppDir" ninja -C build install
 
+      # Pinned references plus a committed SHA-256, checked before anything is
+      # made executable. See packaging/appimage/README.md to update.
+      - name: Fetch pinned packaging tools
+        run: |
+          set -euo pipefail
+          . packaging/appimage/tools.env
+          fetch() { curl --fail --silent --show-error --location --proto '=https' --output "$1" "$2"; }
+          fetch linuxdeploy-x86_64.AppImage \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_TAG}/linuxdeploy-x86_64.AppImage"
+          fetch linuxdeploy-plugin-gtk.sh \
+            "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/${PLUGIN_GTK_COMMIT}/linuxdeploy-plugin-gtk.sh"
+          fetch linuxdeploy-plugin-gstreamer.sh \
+            "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/${PLUGIN_GSTREAMER_COMMIT}/linuxdeploy-plugin-gstreamer.sh"
+          sha256sum --check --strict packaging/appimage/tools.sha256
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gstreamer.sh
+
       - name: Build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           DEPLOY_GTK_VERSION: "4"
           OUTPUT: audio-compare-${{ github.ref_name }}-x86_64.AppImage
         run: |
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
-          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gstreamer/master/linuxdeploy-plugin-gstreamer.sh
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh linuxdeploy-plugin-gstreamer.sh
           ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/org.mmxgn.audiocompare.desktop \
@@ -46,14 +62,18 @@ jobs:
             --plugin gstreamer \
             --output appimage
 
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: audio-compare-*.AppImage
+          name: appimage
+          path: audio-compare-*.AppImage
+          if-no-files-found: error
 
   deb:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install deps
         run: |
@@ -68,15 +88,20 @@ jobs:
           dpkg-buildpackage -b -us -uc
           cp ../audio-compare_*.deb .
 
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: "*.deb"
+          name: deb
+          path: "*.deb"
+          if-no-files-found: error
 
   rpm:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    # The tag is documentation; the digest is what runs.
+    container: fedora:45@sha256:a7d72ba2745b100a3351087472e5ee7b2450af7cf331e7673007e3817612839c
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install deps
         run: |
@@ -96,9 +121,11 @@ jobs:
           rpmbuild -bb ~/rpmbuild/SPECS/audio-compare.spec
           find ~/rpmbuild/RPMS -name '*.rpm' -exec cp {} . \;
 
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: "*.rpm"
+          name: rpm
+          path: "*.rpm"
+          if-no-files-found: error
 
   dmg:
     runs-on: macos-15
@@ -107,7 +134,9 @@ jobs:
       HOMEBREW_NO_INSTALL_CLEANUP: "1"
       HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install deps
         run: brew install meson ninja pkg-config gtk4 libadwaita gstreamer libebur128 librsvg
@@ -115,6 +144,32 @@ jobs:
       - name: Build .app and .dmg
         run: packaging/macos/make-app.py --dmg
 
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: dist/*.dmg
+          name: dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  # The only job with a write token. It runs no build tooling: it collects the
+  # packages, checksums them and creates the release with the runner's gh CLI.
+  # needs: makes the release all-or-nothing.
+  publish:
+    needs: [appimage, deb, rpm, dmg]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
