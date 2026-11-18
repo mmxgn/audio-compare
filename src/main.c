@@ -26,6 +26,7 @@ typedef struct {
     gboolean   playing;      // intended play state; the pipeline follows it
     gboolean   scrubbing;    // a scrub drag holds the pipeline paused
     guint      tick_id;
+    guint      analysing; // analyses whose completion has not run yet
 } App;
 
 static App app;
@@ -339,10 +340,33 @@ on_wave_leave(GtkEventControllerMotion *m, gpointer wf)
         app.hovered_wave = NULL;
 }
 
+// Main thread, once a track's worker analysis ends. `user` is the Track, but
+// it may have been freed since (pane closed, app quitting): track_free()
+// cancels first, and a cancelled task reports G_IO_ERROR_CANCELLED here even if
+// the worker had already finished, so on any error the Track is not touched.
 static void
-add_track(const char *uri)
+on_analysed(GObject *src, GAsyncResult *res, gpointer user)
 {
-    Track *t = track_new(uri);
+    app.analysing--;
+    GError        *err = NULL;
+    TrackAnalysis *a   = track_analysis_finish(res, &err);
+    if (!a) {
+        g_clear_error(&err);
+        return;
+    }
+    Track *t = user;
+
+    GArray *old  = t->peaks;
+    t->peaks     = a->peaks;
+    a->peaks     = old; // freed with a
+    t->duration  = a->duration;
+    t->lufs      = a->lufs;
+    t->dbtp      = a->dbtp;
+    t->truncated = a->truncated;
+    t->stalled   = a->stalled;
+    t->analysing = FALSE;
+    track_analysis_free(a);
+
     if (t->truncated || t->stalled) {
         char *msg = g_strdup_printf(t->truncated ? "%s is very long: showing only the first 4 hours"
                                                  : "%s stopped decoding: waveform is incomplete",
@@ -350,6 +374,19 @@ add_track(const char *uri)
         toast(msg);
         g_free(msg);
     }
+    guint i;
+    if (g_ptr_array_find(app.tracks, t, &i))
+        gtk_widget_queue_draw(g_ptr_array_index(app.waves, i));
+}
+
+static void
+add_track(const char *uri)
+{
+    // Peaks and loudness come from a worker thread, so a long file no longer
+    // freezes the window; the pane shows "Analysing" and plays meanwhile.
+    Track *t = track_new(uri);
+    app.analysing++;
+    track_analysis_start(t->uri, t->cancel, on_analysed, t);
     g_ptr_array_add(app.tracks, t);
     player_add(t);
 
@@ -733,7 +770,11 @@ on_shutdown(GApplication *gapp, gpointer user)
         g_source_remove(app.tick_id);
     player_shutdown();
     for (guint i = 0; i < app.tracks->len; i++)
-        track_free(g_ptr_array_index(app.tracks, i));
+        track_free(g_ptr_array_index(app.tracks, i)); // cancels its analysis
+    // Let the cancelled workers wind down (each within a poll interval) before
+    // GStreamer and the process go away under them.
+    while (app.analysing > 0)
+        g_main_context_iteration(NULL, TRUE);
     g_ptr_array_free(app.tracks, TRUE);
     g_ptr_array_free(app.waves, TRUE);
     g_ptr_array_free(app.rows, TRUE);
