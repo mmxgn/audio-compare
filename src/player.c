@@ -67,10 +67,15 @@ release_branch(GstElement *branch)
     GstObject *owner  = mixpad ? gst_pad_get_parent(mixpad) : NULL;
     if (owner == GST_OBJECT(mixer)) {
         gst_element_set_locked_state(branch, TRUE);
-        gst_element_set_state(branch, GST_STATE_NULL);
+        // Detach from the mixer BEFORE stopping the branch. While paused, the
+        // branch's streaming thread sits parked in the mixer's sink pad holding
+        // its stream locks; stopping the branch first waits on those locks
+        // forever, on the main thread. Releasing the request pad flushes it and
+        // sends that thread back upstream, where the NULL below can join it.
         gst_pad_unlink(src, mixpad);
         gst_element_release_request_pad(mixer, mixpad);
         gst_object_unref(mixpad); // the Track's ref
+        gst_element_set_state(branch, GST_STATE_NULL);
         gst_bin_remove(GST_BIN(pipeline), branch);
         gst_element_set_state(pipeline, GST_STATE_TARGET(pipeline));
     }
