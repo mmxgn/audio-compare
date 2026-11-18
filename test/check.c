@@ -3,6 +3,7 @@
 // the player is stubbed out so no pipeline, window or display is needed.
 #include <adwaita.h>
 #include <assert.h>
+#include <glib/gstdio.h>
 
 static int redraws;
 #define gtk_widget_queue_draw(w) (redraws++)
@@ -93,6 +94,28 @@ track_new(const char *uri)
 void
 track_free(Track *t)
 {
+}
+void
+track_analysis_start(const char *uri, GCancellable *cancel, GAsyncReadyCallback cb, gpointer user)
+{
+}
+// What the next track_analysis_finish() hands back: a result, or (NULL) the
+// cancel GTask reports once the Track was freed.
+static TrackAnalysis *stub_result;
+TrackAnalysis *
+track_analysis_finish(GAsyncResult *res, GError **err)
+{
+    if (!stub_result)
+        g_set_error_literal(err, G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled");
+    TrackAnalysis *a = stub_result;
+    stub_result      = NULL;
+    return a;
+}
+void
+track_analysis_free(TrackAnalysis *a)
+{
+    g_array_free(a->peaks, TRUE);
+    g_free(a);
 }
 
 // ---- harness ---------------------------------------------------------------
@@ -252,6 +275,73 @@ test_playhead_redraw_is_guarded(void)
     assert(redraws == after_first && "a paused tick must not redraw every frame");
 }
 
+// Only regular local files become tracks, and their URI is always the escaped
+// form GLib builds -- never the raw string a placeholder GFile carries.
+static void
+test_track_uri_gate(void)
+{
+    char *dir = g_dir_make_tmp("ac-uri-XXXXXX", NULL);
+    assert(dir);
+    char *path = g_build_filename(dir, "a\" ! identity name=canary ! b.wav", NULL);
+    assert(g_file_set_contents(path, "", 0, NULL));
+
+    GFile *f   = g_file_new_for_path(path);
+    char  *uri = local_audio_uri(f);
+    assert(uri && "a regular local file is accepted");
+    assert(!strchr(uri, '"') && !strchr(uri, ' ') && "its URI is percent-encoded");
+    g_free(uri);
+    g_object_unref(f);
+
+    f = g_file_new_for_path(dir);
+    assert(!local_audio_uri(f) && "a directory is rejected");
+    g_object_unref(f);
+
+    f = g_file_new_for_uri("http://example.invalid/x.flac");
+    assert(!local_audio_uri(f) && "a remote URI is rejected");
+    g_object_unref(f);
+
+    f = g_file_new_for_commandline_arg("foo:\" ! identity name=canary ! fakesink name=\"b");
+    assert(!local_audio_uri(f) && "a placeholder scheme: argument is rejected");
+    g_object_unref(f);
+
+    g_unlink(path);
+    g_rmdir(dir);
+    g_free(path);
+    g_free(dir);
+}
+
+// The worker's completion moves its result into the Track and redraws it, but
+// a completion for a cancelled analysis (pane closed, Track freed) must not
+// touch the Track at all.
+static void
+test_analysis_completion(void)
+{
+    reset(1);
+    app.active          = 0;
+    tracks[0].analysing = TRUE;
+    app.analysing       = 2;
+
+    // cancelled: the user pointer is stale; a poisoned one would crash if used
+    stub_result = NULL;
+    on_analysed(NULL, NULL, (gpointer)0x1);
+    assert(app.analysing == 1 && "a cancelled completion still counts as done");
+    assert(redraws == 0);
+
+    TrackAnalysis *a = g_new0(TrackAnalysis, 1);
+    a->peaks         = g_array_new(FALSE, FALSE, sizeof(Peak));
+    Peak p           = { -0.5f, 0.5f };
+    g_array_append_val(a->peaks, p);
+    a->duration = 3 * GST_SECOND;
+    a->lufs     = -14.0;
+    a->dbtp     = -1.0;
+    stub_result = a;
+    on_analysed(NULL, NULL, &tracks[0]);
+    assert(app.analysing == 0);
+    assert(!tracks[0].analysing && tracks[0].peaks->len == 1);
+    assert(tracks[0].duration == 3 * GST_SECOND && tracks[0].lufs == -14.0);
+    assert(redraws == 1 && "the pane is redrawn with the new peaks");
+}
+
 // Optional argument selects one bug's check, so each can be shown to fail on
 // its own against the unfixed code; no argument runs them all.
 int
@@ -268,6 +358,10 @@ main(int argc, char **argv)
         test_playhead_redraw_is_guarded();
     if (!only || g_str_equal(only, "9"))
         test_scrub_seeks_coalesce();
-    g_print("checks passed: %s\n", only ? only : "1 6 7 8 9");
+    if (!only || g_str_equal(only, "uri"))
+        test_track_uri_gate();
+    if (!only || g_str_equal(only, "async"))
+        test_analysis_completion();
+    g_print("checks passed: %s\n", only ? only : "1 6 7 8 9 uri async");
     return 0;
 }

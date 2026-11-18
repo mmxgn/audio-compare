@@ -26,6 +26,7 @@ typedef struct {
     gboolean   playing;      // intended play state; the pipeline follows it
     gboolean   scrubbing;    // a scrub drag holds the pipeline paused
     guint      tick_id;
+    guint      analysing; // analyses whose completion has not run yet
 } App;
 
 static App app;
@@ -339,10 +340,53 @@ on_wave_leave(GtkEventControllerMotion *m, gpointer wf)
         app.hovered_wave = NULL;
 }
 
+// Main thread, once a track's worker analysis ends. `user` is the Track, but
+// it may have been freed since (pane closed, app quitting): track_free()
+// cancels first, and a cancelled task reports G_IO_ERROR_CANCELLED here even if
+// the worker had already finished, so on any error the Track is not touched.
+static void
+on_analysed(GObject *src, GAsyncResult *res, gpointer user)
+{
+    app.analysing--;
+    GError        *err = NULL;
+    TrackAnalysis *a   = track_analysis_finish(res, &err);
+    if (!a) {
+        g_clear_error(&err);
+        return;
+    }
+    Track *t = user;
+
+    GArray *old  = t->peaks;
+    t->peaks     = a->peaks;
+    a->peaks     = old; // freed with a
+    t->duration  = a->duration;
+    t->lufs      = a->lufs;
+    t->dbtp      = a->dbtp;
+    t->truncated = a->truncated;
+    t->stalled   = a->stalled;
+    t->analysing = FALSE;
+    track_analysis_free(a);
+
+    if (t->truncated || t->stalled) {
+        char *msg = g_strdup_printf(t->truncated ? "%s is very long: showing only the first 4 hours"
+                                                 : "%s stopped decoding: waveform is incomplete",
+                                    t->name);
+        toast(msg);
+        g_free(msg);
+    }
+    guint i;
+    if (g_ptr_array_find(app.tracks, t, &i))
+        gtk_widget_queue_draw(g_ptr_array_index(app.waves, i));
+}
+
 static void
 add_track(const char *uri)
 {
+    // Peaks and loudness come from a worker thread, so a long file no longer
+    // freezes the window; the pane shows "Analysing" and plays meanwhile.
     Track *t = track_new(uri);
+    app.analysing++;
+    track_analysis_start(t->uri, t->cancel, on_analysed, t);
     g_ptr_array_add(app.tracks, t);
     player_add(t);
 
@@ -541,6 +585,42 @@ on_shortcuts(GSimpleAction *a, GVariant *p, gpointer user)
     adw_dialog_present(ADW_DIALOG(d), GTK_WIDGET(app.win));
 }
 
+// The only gate a track URI passes through: a regular local file, turned into
+// a URI by GLib so it is always percent-encoded. g_file_get_uri() on a GIO
+// placeholder file (a non-local "scheme:..." argument or drop) hands back the
+// raw string, so a URI is never taken from anywhere else. Rejects remote and
+// GVfs locations, directories, FIFOs and device nodes.
+static char *
+local_audio_uri(GFile *file)
+{
+    if (!g_file_is_native(file))
+        return NULL;
+    if (g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_REGULAR)
+        return NULL;
+    char *path = g_file_get_path(file);
+    if (!path)
+        return NULL;
+    char *uri = g_filename_to_uri(path, NULL, NULL);
+    g_free(path);
+    return uri;
+}
+
+static void
+add_track_from_file(GFile *file)
+{
+    char *uri = local_audio_uri(file);
+    if (!uri) {
+        char *shown = g_file_get_parse_name(file);
+        char *msg = g_strdup_printf("Cannot open %s: only local audio files are supported", shown);
+        toast(msg);
+        g_free(msg);
+        g_free(shown);
+        return;
+    }
+    add_track(uri);
+    g_free(uri);
+}
+
 static void
 on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
 {
@@ -552,10 +632,8 @@ on_files_chosen(GObject *src, GAsyncResult *res, gpointer user)
     }
     guint n = g_list_model_get_n_items(files);
     for (guint i = 0; i < n; i++) {
-        GFile *f   = g_list_model_get_item(files, i);
-        char  *uri = g_file_get_uri(f);
-        add_track(uri);
-        g_free(uri);
+        GFile *f = g_list_model_get_item(files, i);
+        add_track_from_file(f);
         g_object_unref(f);
     }
     g_object_unref(files);
@@ -575,11 +653,8 @@ on_drop(GtkDropTarget *t, const GValue *value, double x, double y, gpointer user
     if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
         return FALSE;
     GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
-    for (GSList *l = files; l; l = l->next) {
-        char *uri = g_file_get_uri(l->data);
-        add_track(uri);
-        g_free(uri);
-    }
+    for (GSList *l = files; l; l = l->next)
+        add_track_from_file(l->data);
     g_slist_free(files);
     return TRUE;
 }
@@ -678,11 +753,8 @@ static void
 on_app_open(GApplication *gapp, GFile **files, gint n_files, const gchar *hint, gpointer user)
 {
     activate(GTK_APPLICATION(gapp), NULL);
-    for (gint i = 0; i < n_files; i++) {
-        char *uri = g_file_get_uri(files[i]);
-        add_track(uri);
-        g_free(uri);
-    }
+    for (gint i = 0; i < n_files; i++)
+        add_track_from_file(files[i]);
     if (app.active >= 0 && !app.playing)
         toggle_play();
 }
@@ -698,7 +770,11 @@ on_shutdown(GApplication *gapp, gpointer user)
         g_source_remove(app.tick_id);
     player_shutdown();
     for (guint i = 0; i < app.tracks->len; i++)
-        track_free(g_ptr_array_index(app.tracks, i));
+        track_free(g_ptr_array_index(app.tracks, i)); // cancels its analysis
+    // Let the cancelled workers wind down (each within a poll interval) before
+    // GStreamer and the process go away under them.
+    while (app.analysing > 0)
+        g_main_context_iteration(NULL, TRUE);
     g_ptr_array_free(app.tracks, TRUE);
     g_ptr_array_free(app.waves, TRUE);
     g_ptr_array_free(app.rows, TRUE);

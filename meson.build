@@ -33,3 +33,7 @@ test('ui-state', executable('check', 'test/check.c', dependencies: deps, install
 test('teardown', executable('teardown', 'test/teardown.c', 'src/player.c',
   include_directories: include_directories('src'), dependencies: deps, install: false),
   is_parallel: false, timeout: 60)
+
+# The real analysis pipeline from track.c, without a window or display.
+test('analysis', executable('analysis', 'test/analysis.c', 'src/track.c',
+  include_directories: include_directories('src'), dependencies: deps, install: false))
