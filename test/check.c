@@ -3,6 +3,7 @@
 // the player is stubbed out so no pipeline, window or display is needed.
 #include <adwaita.h>
 #include <assert.h>
+#include <glib/gstdio.h>
 
 static int redraws;
 #define gtk_widget_queue_draw(w) (redraws++)
@@ -252,6 +253,41 @@ test_playhead_redraw_is_guarded(void)
     assert(redraws == after_first && "a paused tick must not redraw every frame");
 }
 
+// Only regular local files become tracks, and their URI is always the escaped
+// form GLib builds -- never the raw string a placeholder GFile carries.
+static void
+test_track_uri_gate(void)
+{
+    char *dir = g_dir_make_tmp("ac-uri-XXXXXX", NULL);
+    assert(dir);
+    char *path = g_build_filename(dir, "a\" ! identity name=canary ! b.wav", NULL);
+    assert(g_file_set_contents(path, "", 0, NULL));
+
+    GFile *f   = g_file_new_for_path(path);
+    char  *uri = local_audio_uri(f);
+    assert(uri && "a regular local file is accepted");
+    assert(!strchr(uri, '"') && !strchr(uri, ' ') && "its URI is percent-encoded");
+    g_free(uri);
+    g_object_unref(f);
+
+    f = g_file_new_for_path(dir);
+    assert(!local_audio_uri(f) && "a directory is rejected");
+    g_object_unref(f);
+
+    f = g_file_new_for_uri("http://example.invalid/x.flac");
+    assert(!local_audio_uri(f) && "a remote URI is rejected");
+    g_object_unref(f);
+
+    f = g_file_new_for_commandline_arg("foo:\" ! identity name=canary ! fakesink name=\"b");
+    assert(!local_audio_uri(f) && "a placeholder scheme: argument is rejected");
+    g_object_unref(f);
+
+    g_unlink(path);
+    g_rmdir(dir);
+    g_free(path);
+    g_free(dir);
+}
+
 // Optional argument selects one bug's check, so each can be shown to fail on
 // its own against the unfixed code; no argument runs them all.
 int
@@ -268,6 +304,8 @@ main(int argc, char **argv)
         test_playhead_redraw_is_guarded();
     if (!only || g_str_equal(only, "9"))
         test_scrub_seeks_coalesce();
-    g_print("checks passed: %s\n", only ? only : "1 6 7 8 9");
+    if (!only || g_str_equal(only, "uri"))
+        test_track_uri_gate();
+    g_print("checks passed: %s\n", only ? only : "1 6 7 8 9 uri");
     return 0;
 }
