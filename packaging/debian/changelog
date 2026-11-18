@@ -1,3 +1,16 @@
+audio-compare (0.4.0-1) unstable; urgency=medium
+
+  * Security: track URIs are passed to GStreamer as values, never parsed as
+    pipeline syntax.
+  * Security: file analysis is bounded in memory and length (4 h cap, stall
+    timeout) and runs on a worker thread, so long files no longer freeze the
+    window; closing a pane cancels its analysis.
+  * Security: release toolchain pinned and verified; build split from publish.
+  * Fix a deadlock when tearing down a failed track's branch.
+  * macOS: global menu bar with standard shortcuts and native window controls.
+
+ -- mmxgn <mmxgn@users.noreply.github.com>  Wed, 18 Nov 2026 11:51:20 +0000
+
 audio-compare (0.3.1-1) unstable; urgency=medium
 
   * Fix Debian packaging: add maintainer email so the .deb builds again.
