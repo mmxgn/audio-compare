@@ -64,8 +64,10 @@ void track_analyze(TrackAnalysis *a, const char *uri, GstElement *pipe, GstAppSi
 TrackAnalysis *track_analysis_run(const char *uri, GCancellable *cancel);
 void           track_analysis_free(TrackAnalysis *a);
 
-// Runs track_analysis_run() on a worker thread; `cb` fires on the calling
-// thread's main context. The worker only ever sees its own copy of `uri`.
+// Runs track_analysis_run() on a worker thread; `cb` always fires on the
+// default (main loop) context, whatever context is thread-default when this is
+// called. Call it from the main thread. The worker only ever sees its own copy
+// of `uri`.
 void track_analysis_start(const char *uri, GCancellable *cancel, GAsyncReadyCallback cb,
                           gpointer user);
 // NULL with G_IO_ERROR_CANCELLED once `cancel` was cancelled, even if the

@@ -237,6 +237,38 @@ test_async_analysis(void)
     g_free(dir);
 }
 
+// Regression: GTK on macOS pushes a temporary thread-default main context while
+// it dispatches a drag-and-drop (seen in on_drop), and that context is never
+// iterated again. A completion bound to it never ran, so the pane said
+// "Analysing..." forever. It must land on the default context regardless.
+static void
+test_completion_ignores_temporary_context(void)
+{
+    char *dir, *path = make_wav(&dir);
+    char *uri = g_filename_to_uri(path, NULL, NULL);
+
+    GMainContext *tmp = g_main_context_new();
+    Done          d   = { 0 };
+    g_main_context_push_thread_default(tmp); // as during a drop
+    track_analysis_start(uri, NULL, on_done, &d);
+    g_main_context_pop_thread_default(tmp);
+
+    gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+    while (!d.done && g_get_monotonic_time() < deadline)
+        if (!g_main_context_iteration(NULL, FALSE))
+            g_usleep(1000);
+    assert(d.done && "completion must arrive on the default main context");
+    assert(d.a && d.a->peaks->len > 0);
+    track_analysis_free(d.a);
+    g_main_context_unref(tmp);
+
+    g_free(uri);
+    g_unlink(path);
+    g_rmdir(dir);
+    g_free(path);
+    g_free(dir);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -247,6 +279,7 @@ main(int argc, char **argv)
     test_stalled_source_times_out();
     test_track_new_is_cheap();
     test_async_analysis();
+    test_completion_ignores_temporary_context();
     test_cancel_stops_analysis();
     g_print("analysis checks passed\n");
     return 0;
