@@ -122,7 +122,14 @@ analysis_thread(GTask *task, gpointer src, gpointer uri, GCancellable *cancel)
 void
 track_analysis_start(const char *uri, GCancellable *cancel, GAsyncReadyCallback cb, gpointer user)
 {
+    // GTask delivers `cb` on the thread-default main context captured here. GTK
+    // on macOS pushes a temporary one while it dispatches a drag-and-drop and
+    // never iterates it again, so a completion bound to it was lost and the
+    // pane stayed "Analysing..." forever. Bind it to the app's main loop.
+    GMainContext *main_ctx = g_main_context_default();
+    g_main_context_push_thread_default(main_ctx);
     GTask *task = g_task_new(NULL, cancel, cb, user);
+    g_main_context_pop_thread_default(main_ctx);
     g_task_set_source_tag(task, track_analysis_start);
     g_task_set_task_data(task, g_strdup(uri), g_free);
     g_task_run_in_thread(task, analysis_thread);
