@@ -14,7 +14,7 @@
       packages = forAllSystems (pkgs: {
         default = pkgs.stdenv.mkDerivation {
           pname = "audio-compare";
-          version = "0.4.0";
+          version = "0.4.1";
           src = pkgs.lib.cleanSource ./.;
           nativeBuildInputs = with pkgs; [ meson ninja pkg-config wrapGAppsHook4 ];
           buildInputs = [ pkgs.gtk4 pkgs.libadwaita pkgs.libebur128 ] ++ gstFor pkgs;
